@@ -1,4 +1,4 @@
-module CPU.Instruction
+module CPU.Decode
   ( InstRaw
   , InstDecoded
   ) where

@@ -12,20 +12,7 @@ import Text.Printf
 import Data.Bits
 import Data.Word
 
-takeEvery :: Int -> [a] -> [a]
-takeEvery n = map snd
-            . filter ((==0) . fst)
-            . zip (cycle [0..n-1])
-
-chunksOf :: Int -> [a] -> [[a]]
-chunksOf _ [] = []
-chunksOf n xs = L.take n xs : chunksOf n (L.drop n xs)
-
-toWord32 :: [Word8] -> Word32
-toWord32 xs = fromNum $ fromIntegral <$> xs
-  where fromNum (d:c:b:a:[]) = shiftL a 24 .|.
-                               shiftL b 16 .|.
-                               shiftL c  8 .|. d
+import Utils.Files
 
 createOneFile :: [Word8] -> FilePath -> Int -> IO ()
 createOneFile bytes basename i = do

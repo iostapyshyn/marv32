@@ -1,6 +1,9 @@
-module CPU.DataMem
+{-# LANGUAGE MagicHash #-}
+
+module CPU.Memory
   ( MWidth
   , MAddr
+  , instMem
   , dataMem
   ) where
 
@@ -9,6 +12,7 @@ import Data.Either (isLeft)
 import qualified Data.List as L
 
 import CPU.Types
+import CPU.Decode
 
 import Text.Printf
 
@@ -49,15 +53,23 @@ concatMaybeVec sext v = extend sext $ foldr go (0, 0) v
                                       | otherwise             = x
                                 in v2bv . reverse $ imap fn bv
 
+instMem :: Vec 4 (MemBlob n 8) -> PC -> InstRaw
+instMem blobs pc = (concatBitVector#) roms
+  where index = shiftR pc 2
+        roms = (asyncRomBlob (blobs !! 3) index :>
+                asyncRomBlob (blobs !! 2) index :>
+                asyncRomBlob (blobs !! 1) index :>
+                asyncRomBlob (blobs !! 0) index :> Nil)
+
 -- TODO: Unaligned accesses are possible
 dataMem :: HiddenClockResetEnable dom
-        => (SNat n, FilePath)
+        => Vec 4 (MemBlob n 8)
         -> Signal dom MWidth
         -> Signal dom Bool
         -> Signal dom (Maybe MWordS)
         -> Signal dom MAddr
         -> Signal dom MWordS
-dataMem (size,dpath) width sext wdata addr = go
+dataMem blobs width sext wdata addr = go
   where
     disableBytes :: MWidth -> MAddr -> Index 4 -> b -> Maybe b
     disableBytes width addr i x = whenMaybe x
@@ -96,13 +108,12 @@ dataMem (size,dpath) width sext wdata addr = go
          => Vec 4 (Signal dom (MAddr))
          -> Vec 4 (Signal dom (Maybe (BitVector 8)))
          -> Vec 4 (Signal dom (BitVector 8))
-    rams addrs wdatas = (blockRamFile @8 size (files !! 3) (addrs !! 0) (wports !! 0) :>
-                         blockRamFile @8 size (files !! 2) (addrs !! 1) (wports !! 1) :>
-                         blockRamFile @8 size (files !! 1) (addrs !! 2) (wports !! 2) :>
-                         blockRamFile @8 size (files !! 0) (addrs !! 3) (wports !! 3) :> Nil)
+    rams addrs wdatas = (blockRamBlob (blobs !! 3) (addrs !! 0) (wports !! 0) :>
+                         blockRamBlob (blobs !! 2) (addrs !! 1) (wports !! 1) :>
+                         blockRamBlob (blobs !! 1) (addrs !! 2) (wports !! 2) :>
+                         blockRamBlob (blobs !! 0) (addrs !! 3) (wports !! 3) :> Nil)
       where wports = zipWith (\addr wdata -> tuplify <$> addr <*> wdata) addrs wdatas
             tuplify addr' = fmap ((,) addr')
-            files = imap (\i x -> printf "rom/%s/%d.rom" x i) (replicate d4 dpath)
 
     ramsB addr wdata = bundle $ rams (unbundle addr) (unbundle wdata)
 
