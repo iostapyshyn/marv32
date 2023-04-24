@@ -1,6 +1,8 @@
 module Utils.Files
   ( getBank
-  , takeEvery ) where
+  , takeEvery
+  , chunksOf
+  , toWord32 ) where
 
 import Prelude
 

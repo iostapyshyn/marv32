@@ -1,33 +1,16 @@
 {-# LANGUAGE MagicHash #-}
 
 module CPU.Memory
-  ( MWidth
-  , MAddr
-  , instMem
+  ( instMem
   , dataMem
   ) where
 
 import Clash.Prelude
-import Data.Either (isLeft)
-import qualified Data.List as L
 
 import CPU.Types
 import CPU.Decode
 
-import Text.Printf
-
-data MWidth = Word | Half | Byte -- Width of access
-type MAddr  = MWordU             -- Address line
-
-instance NFDataX MWidth where
-  deepErrorX = errorX
-  rnfX = rwhnfX
-  hasUndefined = isLeft . isX
-  ensureSpine = id
-
-whenMaybe :: a -> Bool -> Maybe a
-whenMaybe _ False = Nothing
-whenMaybe a True = Just a
+import Utils
 
 concatMaybeVec :: (KnownNat n, KnownNat m)
                => Bool
@@ -64,17 +47,17 @@ instMem blobs pc = (concatBitVector#) roms
 -- TODO: Unaligned accesses are possible
 dataMem :: HiddenClockResetEnable dom
         => Vec 4 (MemBlob n 8)
-        -> Signal dom MWidth
-        -> Signal dom Bool
+        -> Signal dom MDetails
         -> Signal dom (Maybe MWordS)
         -> Signal dom MAddr
         -> Signal dom MWordS
-dataMem blobs width sext wdata addr = go
+dataMem blobs details wdata addr = go
   where
+    (width, sext) = unbundle details
     disableBytes :: MWidth -> MAddr -> Index 4 -> b -> Maybe b
     disableBytes width addr i x = whenMaybe x
-                                  . byteEnable
-                                  . fromIntegral $ i
+                                . byteEnable
+                                . fromIntegral $ i
       where byteEnable i = case width of
               Word -> case addr .&. 0b11 of
                 0 -> True
@@ -101,7 +84,12 @@ dataMem blobs width sext wdata addr = go
                                     . imap (disableBytes width addr)
                                     $ rdatas
 
-    go = joinData <$> width <*> sext <*> addr <*> go'
+    -- read data comes in the next clock cycle
+    width' = register Word width
+    sext' = register False sext
+    addr' = register 0 addr
+
+    go = joinData <$> width' <*> sext' <*> addr' <*> go'
       where go' = ramsB (addrs <$> addr) (wdatas <$> width <*> wdata <*> addr)
 
     rams :: HiddenClockResetEnable dom
@@ -116,21 +104,3 @@ dataMem blobs width sext wdata addr = go
             tuplify addr' = fmap ((,) addr')
 
     ramsB addr wdata = bundle $ rams (unbundle addr) (unbundle wdata)
-
-
--- sim = L.zip [0..] $ L.take 10 $ simulate @System dataMem'' input
---   where input = [ (Word, True, Nothing, 0)
---                 , (Half, True, Nothing, 0)
---                 , (Half, True, Nothing, 2)
---                 , (Byte, True, Nothing, 0)
---                 , (Byte, True, Nothing, 1)
---                 , (Byte, True, Nothing, 2)
---                 , (Byte, True, Nothing, 3)
---                 , (Word, True, Just (0xF5F5F5F5), 0)
---                 , (Word, True, Nothing, 0)
---                 , (Word, True, Nothing, 0)
---                 ]
---         dataMem' (a,b,c,d) = dataMem (pow2SNat d14, "t") a b c d
---         dataMem'' x = pack <$> (dataMem' $ unbundle x)
-
--- topEntity = exposeClockResetEnable @System $ dataMem d256 "t"

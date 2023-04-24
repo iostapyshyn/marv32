@@ -1,5 +1,6 @@
 module CPU.ALU
   ( AluOp (..)
+  , alu
   ) where
 
 import Clash.Prelude
