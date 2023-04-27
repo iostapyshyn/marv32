@@ -23,7 +23,7 @@ data MWidth = Word | Half | Byte -- Width of access
   deriving (Show)
 type MAddr  = MWordU             -- Address line
 
-type MDetails = (MWidth, Bool)
+type MDetails = (Unsigned 2, Bool)
 
 instance NFDataX MWidth where
   deepErrorX = errorX
@@ -140,15 +140,15 @@ instAluOp opcode funct7 funct3 =
     0x23 -> (AluAdd, SrcRs1, SrcImm, Just (True, storeDetails))
   where
     loadDetails = case funct3 of
-      0x0 -> (Byte, False)                       -- lb
-      0x1 -> (Half, False)                       -- lh
-      0x2 -> (Word, False)                       -- lw
+      0x0 -> (1, False)                       -- lb
+      0x1 -> (2, False)                       -- lh
+      0x2 -> (4, False)                       -- lw
     storeDetails = case funct3 of
-      0x0 -> (Byte, True)                       -- lb
-      0x1 -> (Half, True)                       -- lh
-      0x2 -> (Word, True)                       -- lw
-      0x4 -> (Byte, False)                      -- lbu
-      0x5 -> (Half, False)                      -- lhu
+      0x0 -> (1, True)                       -- lb
+      0x1 -> (2, True)                       -- lh
+      0x2 -> (4, True)                       -- lw
+      0x4 -> (1, False)                      -- lbu
+      0x5 -> (2, False)                      -- lhu
     rAluOp = case funct3 of
       0x0 -> AluAdd                             -- addi
       0x1 -> AluSll                             -- slli

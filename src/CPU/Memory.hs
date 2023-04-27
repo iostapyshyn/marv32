@@ -3,6 +3,7 @@
 module CPU.Memory
   ( instMem
   , dataMem
+  , dataMemSE
   ) where
 
 import Clash.Prelude
@@ -11,96 +12,107 @@ import CPU.Types
 import CPU.Decode
 
 import Utils
-
-concatMaybeVec :: (KnownNat n, KnownNat m)
-               => Bool
-               -> Vec n (Maybe (BitVector m))
-               -> BitVector (n * m)
-concatMaybeVec sext v = extend sext $ foldr go (0, 0) v
-  where go :: (KnownNat n, KnownNat m)
-           => Maybe (BitVector m)
-           -> (Int, BitVector (n * m))
-           -> (Int, BitVector (n * m))
-        go Nothing acc           = acc
-        go (Just (x)) (pos, acc) = ( pos+8
-                                   , acc .|. shiftL (resize x) pos )
-        extend :: (KnownNat n)
-               => Bool
-               -> (Int, BitVector (n))
-               -> BitVector n
-        extend False (_,   v) = v
-        extend True  (len, v) = let bv = reverse $ bv2v v
-                                    sign = bv !! (len-1)
-                                    fn i x
-                                      | fromIntegral i >= len = sign
-                                      | otherwise             = x
-                                in v2bv . reverse $ imap fn bv
+import Data.Maybe
 
 instMem :: Vec 4 (MemBlob n 8) -> PC -> InstRaw
-instMem blobs pc = (concatBitVector#) roms
+instMem blobs pc = (concatBitVector# . reverse) roms
   where index = shiftR pc 2
-        roms = (asyncRomBlob (blobs !! 3) index :>
-                asyncRomBlob (blobs !! 2) index :>
-                asyncRomBlob (blobs !! 1) index :>
-                asyncRomBlob (blobs !! 0) index :> Nil)
+        rom i = asyncRomBlob (blobs !! i) index
+        roms  = map rom (iterateI (+1) 0)
 
--- TODO: Unaligned accesses are possible
+bankAddr :: MAddr   -- ^ Start address
+         -> Index 4 -- ^ Index of the memory bank
+         -> MAddr   -- ^ Address for the specified memory bank
+bankAddr addr i = (addr + (3 - fromIntegral i)) `div` 4
+
+bankIndex :: Unsigned 2      -- ^ Width of the memory access
+          -> MAddr           -- ^ Start address
+          -> Index 4         -- ^ Index of the memory bank
+          -> Maybe (Index 4) -- ^ Index of the byte in the data word starting from LSB
+bankIndex width addr i = whenMaybe index filter
+  where index  = fromIntegral $ (4 - addr + fromIntegral i) `mod` 4
+        filter = (shiftR index (fromIntegral width)) == 0
+
+byteIndex :: Unsigned 2      -- ^ Width of the memory access
+          -> MAddr           -- ^ Start address
+          -> Index 4         -- ^ Index of the byte in the data word starting from LSB
+          -> Maybe (Index 4) -- ^ Index of the memory bank for this byte
+byteIndex width addr i = whenMaybe index filter
+  where index  = fromIntegral $ (addr + fromIntegral i) `mod` 4
+        filter = (shiftR i (fromIntegral width)) == 0
+
 dataMem :: HiddenClockResetEnable dom
         => Vec 4 (MemBlob n 8)
-        -> Signal dom MDetails
-        -> Signal dom (Maybe MWordS)
-        -> Signal dom MAddr
-        -> Signal dom MWordS
-dataMem blobs details wdata addr = go
+        -> Signal dom (Unsigned 2)    -- ^ Access width as an exponent of 2
+        -> Signal dom (Maybe MWordS)  -- ^ Word to write
+        -> Signal dom MAddr           -- ^ Address
+        -> Signal dom (BitVector 32)  -- ^ Read data
+dataMem blobs width wdata addr = go
   where
-    (width, sext) = unbundle details
-    disableBytes :: MWidth -> MAddr -> Index 4 -> b -> Maybe b
-    disableBytes width addr i x = whenMaybe x
-                                . byteEnable
-                                . fromIntegral $ i
-      where byteEnable i = case width of
-              Word -> case addr .&. 0b11 of
-                0 -> True
-              Half -> case addr .&. 0b01 of
-                0 -> i == (addr .&. 0b10) || i == (addr .&. 0b10 + 1)
-              Byte -> fromIntegral (addr .&. 0b11) == i
+    -- Data ready to read in the next clock cycle
+    width' = register def width
+    addr'  = register def addr
 
-    addrs :: MAddr -> Vec 4 (MAddr)
-    addrs a = repeat $ shiftR a 2
+    go = getRdata <$> width' <*> addr' <*>
+      (ramsB (bankAddrs <$> addr) (getWdatas <$> width <*> addr <*> wdata))
 
-    wdatas :: MWidth -> Maybe MWordS -> MAddr -> Vec 4 (Maybe (BitVector 8))
-    wdatas _     (Nothing)    _    = repeat Nothing
-    wdatas width (Just wdata) addr = imap (disableBytes width addr) (permuteData)
-      where wdataVec = (slice d31 d24 wdata :> slice d23 d16 wdata :>
-                        slice d15  d8 wdata :> slice  d7  d0 wdata :> Nil)
-            permuteData = case width of
-              Word -> wdataVec
-              Half -> backpermute wdataVec (2:>3:>2:>3:>Nil)
-              Byte -> backpermute wdataVec (3:>3:>3:>3:>Nil)
+    bankIndices width addr = map (bankIndex width addr) (iterateI (+1) 0)
+    byteIndices width addr = map (byteIndex width addr) (iterateI (+1) 0)
+    bankAddrs         addr = map (bankAddr        addr) (iterateI (+1) 0)
 
-    joinData :: MWidth -> Bool -> MAddr -> Vec 4 (BitVector 8) -> MWordS
-    joinData width sext addr rdatas = unpack
-                                    . concatMaybeVec sext
-                                    . imap (disableBytes width addr)
-                                    $ rdatas
+    getWdatas _     _    (Nothing)    = repeat Nothing
+    getWdatas width addr (Just wdata) = gatherMaybe wdataVec (bankIndices width addr)
+      where wdataVec = (slice d7  d0  wdata :> slice d15 d8  wdata :>
+                        slice d23 d16 wdata :> slice d31 d24 wdata :> Nil)
 
-    -- read data comes in the next clock cycle
-    width' = register Word width
-    sext' = register False sext
-    addr' = register 0 addr
-
-    go = joinData <$> width' <*> sext' <*> addr' <*> go'
-      where go' = ramsB (addrs <$> addr) (wdatas <$> width <*> wdata <*> addr)
+    getRdata width addr rdatas = concatBitVector#
+                               . map (fromMaybe 0)
+                               . reverse
+                               $ gatherMaybe rdatas (byteIndices width addr)
 
     rams :: HiddenClockResetEnable dom
          => Vec 4 (Signal dom (MAddr))
          -> Vec 4 (Signal dom (Maybe (BitVector 8)))
          -> Vec 4 (Signal dom (BitVector 8))
-    rams addrs wdatas = (blockRamBlob (blobs !! 3) (addrs !! 0) (wports !! 0) :>
-                         blockRamBlob (blobs !! 2) (addrs !! 1) (wports !! 1) :>
-                         blockRamBlob (blobs !! 1) (addrs !! 2) (wports !! 2) :>
-                         blockRamBlob (blobs !! 0) (addrs !! 3) (wports !! 3) :> Nil)
+    rams addrs wdatas = map ram (iterateI (1+) 0)
       where wports = zipWith (\addr wdata -> tuplify <$> addr <*> wdata) addrs wdatas
-            tuplify addr' = fmap ((,) addr')
+            tuplify addr = fmap ((,) addr)
+            ram i = blockRamBlob (blobs !! i) (addrs !! i) (wports !! i)
 
     ramsB addr wdata = bundle $ rams (unbundle addr) (unbundle wdata)
+
+signExtend2 :: Unsigned 2   -- ^ Width of the input as an exponent of 2
+            -> BitVector 32 -- ^ Input
+            -> BitVector 32 -- ^ Output
+signExtend2 width v = case width of
+  0 -> signExtend $ slice d7  d0 v
+  1 -> signExtend $ slice d15 d0 v
+  _ -> v
+
+dataMemSE :: HiddenClockResetEnable dom
+          => Vec 4 (MemBlob n 8)
+          -> Signal dom Bool            -- ^ Whether to perform sign extension
+          -> Signal dom (Unsigned 2)    -- ^ Access width as an exponent of 2
+          -> Signal dom (Maybe MWordS)  -- ^ Word to write
+          -> Signal dom MAddr           -- ^ Address
+          -> Signal dom MWordS          -- ^ Read data
+dataMemSE blobs sext width wdata addr = unpack <$> (extend <$> sext' <*> width' <*> mem)
+  where extend True  width v = signExtend2 width v
+        extend False _     v = id v
+
+        sext'  = register False sext
+        width' = register def width
+        mem = dataMem blobs width wdata addr
+
+-- sim = L.zip [0..] $ L.take 10 $ simulate @System dataMem'' input
+--   where input = [ (True, 2, Nothing, 0x78)
+--                 , (True, 0, Nothing, 0x78)
+--                 , (True, 0, Nothing, 0x79)
+--                 , (True, 0, Nothing, 0x7a)
+--                 , (True, 0, Nothing, 0x7b)
+--                 , (True, 0, Nothing, 0x67)
+--                 , (True, 0, Nothing, 0x67)
+--                 , (True, 0, Nothing, 0x67)
+--                 ]
+--         dataMem' (a,b,c,d) = pack <$> dataMemSE progBlobs a b c d
+--         dataMem'' x = dataMem' $ unbundle x

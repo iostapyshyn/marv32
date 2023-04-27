@@ -1,5 +1,6 @@
 module CPU where
 
+import qualified Data.List as L
 import Clash.Prelude
 
 import Data.Maybe (isJust, fromMaybe)
@@ -73,9 +74,10 @@ pipelineMemory i = bundle (instDecoded', out)
         -- -- TODO clean up
         aaa = getMemDetails <$> instDecoded
 
-        (isStore, details) = unbundle $ liftA2 fromMaybe (pure (False, (Word, False))) aaa
+        (isStore, details) = unbundle $ liftA2 fromMaybe (pure (False, (2, False))) aaa
+        (width, sext) = unbundle details
 
-        rdata = dataMem progBlobs details (whenMaybe <$> src <*> isStore) (fromIntegral <$> aluRes)
+        rdata = dataMemSE progBlobs sext width (whenMaybe <$> src <*> isStore) (fromIntegral <$> aluRes)
 
         -- regs:
         aluRes'      = register def aluRes
