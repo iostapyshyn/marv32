@@ -71,19 +71,14 @@ pipelineMemory :: HiddenClockResetEnable dom
 pipelineMemory i = bundle (instDecoded', out)
   where (pc, instDecoded, aluRes, src) = unbundle i
 
-        -- -- TODO clean up
-        aaa = getMemDetails <$> instDecoded
-
-        (isStore, details) = unbundle $ liftA2 fromMaybe (pure (False, (2, False))) aaa
-        (width, sext) = unbundle details
-
-        rdata = dataMemSE progBlobs sext width (whenMaybe <$> src <*> isStore) (fromIntegral <$> aluRes)
+        memAccess = getMemAccess <$> instDecoded
+        rdata = dataMemSE progBlobs memAccess src (fromIntegral <$> aluRes)
 
         -- regs:
         aluRes'      = register def aluRes
         instDecoded' = register def instDecoded
 
-        out = mux (isJust <$> (getMemDetails <$> instDecoded')) rdata aluRes'
+        out = mux (isMemLoad <$> (getMemAccess <$> instDecoded')) rdata aluRes'
 
 pipeline :: HiddenClockResetEnable dom => Signal dom (InstDecoded, MWordS)
 pipeline = memory
@@ -100,3 +95,16 @@ topEntity = exposeClockResetEnable @System $ pipeline
 
 sim = simulateN @System 20 pipeline' [1 :: Int]
   where pipeline' _ = pipeline
+
+-- sim = L.zip [0..] $ L.take 10 $ simulate @System dataMem'' input
+--   where input = [ (2, Nothing, 0)
+--                 , (2, Nothing, 0)
+--                 , (0, Nothing, 0)
+--                 , (0, Nothing, 0)
+--                 , (0, Nothing, 0)
+--                 , (0, Nothing, 0)
+--                 , (0, Nothing, 0)
+--                 , (0, Nothing, 0)
+--                 ]
+--         dataMem' (a,b,c) = pack <$> dataMem progBlobs a b c
+--         dataMem'' x = dataMem' $ unbundle x

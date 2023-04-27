@@ -9,7 +9,7 @@ import CPU.Types
 
 data AluOp = AluAdd | AluSub | AluSll | AluSlt | AluSltu | AluAnd | AluOr
            | AluSrl | AluSra | AluXor
-  deriving (Show)
+  deriving (Show, Generic, NFDataX)
 
 alu :: AluOp -> MWordS -> MWordS -> MWordS
 alu op a b =

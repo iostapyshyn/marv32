@@ -19,6 +19,6 @@ regFile = mealy f (repeat 0 :: RegFile)
   where -- Transfer function:
     f s (rd, rs1Addr, rs2Addr) = (s' rd, ( s' rd !! rs1Addr
                                          , s' rd !! rs2Addr ))
-      where s' (Just (rdAddr, rdData)) = replace rdAddr rdData s
-            s' (Just (     0,      _)) = s -- r0 is always zero
+      where s' (Just (     0,      _)) = s -- r0 is always zero
+            s' (Just (rdAddr, rdData)) = replace rdAddr rdData s
             s' (Nothing)               = s

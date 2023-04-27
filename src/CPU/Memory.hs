@@ -1,4 +1,5 @@
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 module CPU.Memory
   ( instMem
@@ -13,6 +14,8 @@ import CPU.Decode
 
 import Utils
 import Data.Maybe
+
+import qualified Data.List as L
 
 instMem :: Vec 4 (MemBlob n 8) -> PC -> InstRaw
 instMem blobs pc = (concatBitVector# . reverse) roms
@@ -91,28 +94,24 @@ signExtend2 width v = case width of
 
 dataMemSE :: HiddenClockResetEnable dom
           => Vec 4 (MemBlob n 8)
-          -> Signal dom Bool            -- ^ Whether to perform sign extension
-          -> Signal dom (Unsigned 2)    -- ^ Access width as an exponent of 2
-          -> Signal dom (Maybe MWordS)  -- ^ Word to write
+          -> Signal dom MemAccess       -- ^ Information about the access
+          -> Signal dom MWordS          -- ^ Word to write
           -> Signal dom MAddr           -- ^ Address
           -> Signal dom MWordS          -- ^ Read data
-dataMemSE blobs sext width wdata addr = unpack <$> (extend <$> sext' <*> width' <*> mem)
-  where extend True  width v = signExtend2 width v
-        extend False _     v = id v
+dataMemSE blobs access wdata addr = unpack <$> (extend <$> access' <*> mem)
+  where extend access v = case access of
+          MemLoad { width, sign = True } -> signExtend2 width v
+          _                              -> id v
 
-        sext'  = register False sext
-        width' = register def width
-        mem = dataMem blobs width wdata addr
+        getWdata MemStore {} wdata = Just wdata
+        getWdata _           _     = Nothing
 
--- sim = L.zip [0..] $ L.take 10 $ simulate @System dataMem'' input
---   where input = [ (True, 2, Nothing, 0x78)
---                 , (True, 0, Nothing, 0x78)
---                 , (True, 0, Nothing, 0x79)
---                 , (True, 0, Nothing, 0x7a)
---                 , (True, 0, Nothing, 0x7b)
---                 , (True, 0, Nothing, 0x67)
---                 , (True, 0, Nothing, 0x67)
---                 , (True, 0, Nothing, 0x67)
---                 ]
---         dataMem' (a,b,c,d) = pack <$> dataMemSE progBlobs a b c d
---         dataMem'' x = dataMem' $ unbundle x
+        getWidth MemNone = 0
+        getWidth m       = width m
+
+        memWidth = getWidth <$> access
+        memWdata = getWdata <$> access <*> wdata
+
+        mem      = dataMem blobs memWidth memWdata addr
+
+        access'  = register def access
