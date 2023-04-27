@@ -18,7 +18,7 @@ instMem :: Vec 4 (MemBlob n 8) -> PC -> InstRaw
 instMem blobs pc = (concatBitVector# . reverse) roms
   where index = shiftR pc 2
         rom i = asyncRomBlob (blobs !! i) index
-        roms  = map rom (iterateI (+1) 0)
+        roms  = (rom 0 :> rom 1 :> rom 2 :> rom 3 :> Nil)
 
 bankAddr :: MAddr   -- ^ Start address
          -> Index 4 -- ^ Index of the memory bank
@@ -74,7 +74,7 @@ dataMem blobs width wdata addr = go
          => Vec 4 (Signal dom (MAddr))
          -> Vec 4 (Signal dom (Maybe (BitVector 8)))
          -> Vec 4 (Signal dom (BitVector 8))
-    rams addrs wdatas = map ram (iterateI (1+) 0)
+    rams addrs wdatas = (ram 0 :> ram 1 :> ram 2 :> ram 3 :> Nil)
       where wports = zipWith (\addr wdata -> tuplify <$> addr <*> wdata) addrs wdatas
             tuplify addr = fmap ((,) addr)
             ram i = blockRamBlob (blobs !! i) (addrs !! i) (wports !! i)
