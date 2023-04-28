@@ -3,9 +3,11 @@ module CPU.Decode
   , InstDecoded (..)
   , instDecode
   , AluSrc (..)
-  , MemAccess (..)
+  , InstAction (..)
   , isMemLoad
   , aluSrcMux
+  , actionOp
+  , needsWriteback
   ) where
 
 import Clash.Prelude
@@ -17,18 +19,27 @@ import CPU.ALU
 import Data.Either (isLeft)
 import Data.Default
 
-data MemAccess = MemNone
-               | MemLoad { width :: Unsigned 2
-                         , sign  :: Bool }
-               | MemStore { width :: Unsigned 2 }
+data InstAction = Nop
+                | ArithLog AluOp
+                | MemLoad { width :: Unsigned 2
+                          , sign  :: Bool }
+                | MemStore { width :: Unsigned 2 }
   deriving (Show, Generic, NFDataX)
 
-isMemLoad :: MemAccess -> Bool
+instance Default InstAction where def = Nop
+
+actionOp :: InstAction -> AluOp
+actionOp (ArithLog x) = x
+actionOp _            = AluAdd
+
+needsWriteback :: InstAction -> Bool
+needsWriteback MemStore{} = False
+needsWriteback Nop        = False
+needsWriteback _          = True
+
+isMemLoad :: InstAction -> Bool
 isMemLoad MemLoad{} = True
 isMemLoad _         = False
-
-instance Default MemAccess where
-  def = MemNone
 
 data AluSrc = SrcRs1 | SrcRs2 | SrcImm | SrcPC | SrcNil
   deriving (Show, Generic, NFDataX)
@@ -55,27 +66,23 @@ type Funct7   = BitVector 7
 type Funct3   = BitVector 3
 
 data InstDecoded =
-  InstDecoded { getAluOp :: AluOp
+  InstDecoded { getAct   :: InstAction
               , getRs1   :: RegIndex
               , getRs2   :: RegIndex
               , getRd    :: RegIndex
               , getImm   :: MWordS
               , getSrc1  :: AluSrc
               , getSrc2  :: AluSrc
-              , getRegWB :: Bool
-              , getMemAccess :: MemAccess
               } deriving (Show, Generic, NFDataX)
 
 instance Default InstDecoded where
-  def = InstDecoded { getAluOp = AluAdd
+  def = InstDecoded { getAct  = Nop
                     , getRs1  = def
                     , getRs2  = def
                     , getRd   = def
                     , getImm  = def
                     , getSrc1 = def
-                    , getSrc2 = def
-                    , getRegWB = False
-                    , getMemAccess = MemNone}
+                    , getSrc2 = def }
 
 instOpcode :: InstRaw -> Opcode
 instOpcode = unpack . slice d6 d0
@@ -122,19 +129,19 @@ instImm raw = unpack . go . instFormat . instOpcode $ raw
     go InstJ = signExtend (slice d31 d31 raw ++# slice d19 d12 raw ++#
                            slice d20 d20 raw ++# slice d30 d21 raw)
 
-instAluOp :: Opcode -> Funct7 -> Funct3 -> (AluOp, AluSrc, AluSrc, MemAccess)
+instAluOp :: Opcode -> Funct7 -> Funct3 -> (AluSrc, AluSrc, InstAction)
 instAluOp opcode funct7 funct3 =
   case opcode of
-    0x13 -> (iAluOp, SrcRs1, SrcImm, MemNone)
-    0x33 -> (rAluOp, SrcRs1, SrcRs2, MemNone)
-    0x37 -> (AluAdd, SrcNil, SrcImm, MemNone)
-    0x17 -> (AluAdd, SrcPC,  SrcImm, MemNone)
-    0x03 -> (AluAdd, SrcRs1, SrcImm, load)
-    0x23 -> (AluAdd, SrcRs1, SrcImm, store)
+    0x13 -> (SrcRs1, SrcImm, ArithLog iAluOp)
+    0x33 -> (SrcRs1, SrcRs2, ArithLog rAluOp)
+    0x37 -> (SrcNil, SrcImm, ArithLog AluAdd)
+    0x17 -> (SrcPC,  SrcImm, ArithLog AluAdd)
+    0x03 -> (SrcRs1, SrcImm, load)
+    0x23 -> (SrcRs1, SrcImm, store)
   where
     store = MemStore { width = unpack $ slice d1 d0 funct3 } -- sb, sh, sw
-    load  = MemLoad { width = unpack $ slice d1 d0 funct3
-                    , sign = not $ testBit funct3 2 }              -- lb, lh, lw, lbu, lhu
+    load  = MemLoad { width = unpack $ slice d1 d0 funct3    -- lb, lh, lw, lbu, lhu
+                    , sign = not $ testBit funct3 2 }
     rAluOp = case funct3 of
       0x0 -> AluAdd                             -- addi
       0x1 -> AluSll                             -- slli
@@ -161,16 +168,15 @@ instAluOp opcode funct7 funct3 =
         0x5 -> AluSra                           -- sra
 
 instDecode :: InstRaw -> InstDecoded
-instDecode raw = InstDecoded { getAluOp = aluOp
-                             , getSrc1 = aluSrc1
-                             , getSrc2 = aluSrc2
-                             , getRs1 = instRs1 raw
-                             , getRs2 = instRs2 raw
-                             , getRd = instRd raw
-                             , getImm = instImm raw
-                             , getRegWB = True
-                             , getMemAccess = memAccess }
+instDecode raw =
+  InstDecoded { getAct = act
+              , getSrc1 = aluSrc1
+              , getSrc2 = aluSrc2
+              , getRs1 = instRs1 raw
+              , getRs2 = instRs2 raw
+              , getRd = instRd raw
+              , getImm = instImm raw }
   where funct7 = instFunct7 raw
         funct3 = instFunct3 raw
         opcode = instOpcode raw
-        (aluOp, aluSrc1, aluSrc2, memAccess) = instAluOp opcode funct7 funct3
+        (aluSrc1, aluSrc2, act) = instAluOp opcode funct7 funct3

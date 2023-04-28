@@ -48,7 +48,7 @@ pipelineExecute :: HiddenClockResetEnable dom
                 -> Signal dom (PC, InstDecoded, MWordS, MWordS)
 pipelineExecute i = bundle (pc', instDecoded', aluRes', rs2')
   where (pc, instDecoded, rs1, rs2) = unbundle i
-        aluOp = getAluOp <$> instDecoded
+        aluOp = actionOp <$> (getAct <$> instDecoded)
         imm   = getImm <$> instDecoded
 
         -- prettier?
@@ -67,33 +67,39 @@ pipelineExecute i = bundle (pc', instDecoded', aluRes', rs2')
 
 pipelineMemory :: HiddenClockResetEnable dom
                => Signal dom (PC, InstDecoded, MWordS, MWordS)
-               -> Signal dom (InstDecoded, MWordS)
+               -> Signal dom (InstDecoded, Maybe MWordS)
 pipelineMemory i = bundle (instDecoded', out)
   where (pc, instDecoded, aluRes, src) = unbundle i
 
-        memAccess = getMemAccess <$> instDecoded
-        rdata = dataMemSE progBlobs memAccess src (fromIntegral <$> aluRes)
+        action = getAct <$> instDecoded
+        rdata = dataMemSE progBlobs action src (fromIntegral <$> aluRes)
 
         -- regs:
         aluRes'      = register def aluRes
         instDecoded' = register def instDecoded
 
-        out = mux (isMemLoad <$> (getMemAccess <$> instDecoded')) rdata aluRes'
+        writebackMux inst alu mem = case getAct inst of
+          Nop         -> Nothing
+          MemStore {} -> Nothing
+          MemLoad {}  -> Just mem
+          ArithLog _  -> Just alu
 
-pipeline :: HiddenClockResetEnable dom => Signal dom (InstDecoded, MWordS)
+        out = liftA3 writebackMux instDecoded' aluRes' rdata
+
+pipeline :: HiddenClockResetEnable dom => Signal dom (InstDecoded, Maybe MWordS)
 pipeline = memory
   where fetch = pipelineFetch (pure Nothing)
         decode = pipelineDecode fetch wbData
         execute = pipelineExecute decode
         memory = pipelineMemory execute
 
-        (memDecoded, memData) = unbundle memory
-        memData' = bundle (getRd <$> memDecoded, memData)
-        wbData = whenMaybe <$> memData' <*> (getRegWB <$> memDecoded)
+        (wbInst, wbData') = unbundle memory
+        wbReg = getRd <$> wbInst
+        wbData = liftA2 (\x y -> liftA2 (,) (pure x) y) wbReg wbData'
 
 topEntity = exposeClockResetEnable @System $ pipeline
 
-sim = simulateN @System 20 pipeline' [1 :: Int]
+sim = simulateN @System 30 pipeline' [1 :: Int]
   where pipeline' _ = pipeline
 
 -- sim = L.zip [0..] $ L.take 10 $ simulate @System dataMem'' input

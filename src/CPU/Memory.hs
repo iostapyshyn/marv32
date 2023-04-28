@@ -94,24 +94,25 @@ signExtend2 width v = case width of
 
 dataMemSE :: HiddenClockResetEnable dom
           => Vec 4 (MemBlob n 8)
-          -> Signal dom MemAccess       -- ^ Information about the access
+          -> Signal dom InstAction      -- ^ Information about the access
           -> Signal dom MWordS          -- ^ Word to write
           -> Signal dom MAddr           -- ^ Address
           -> Signal dom MWordS          -- ^ Read data
-dataMemSE blobs access wdata addr = unpack <$> (extend <$> access' <*> mem)
-  where extend access v = case access of
-          MemLoad { width, sign = True } -> signExtend2 width v
-          _                              -> id v
+dataMemSE blobs action wdata addr = unpack <$> (extend <$> action' <*> mem)
+  where extend MemLoad { width, sign = True } = signExtend2 width
+        extend _                              = id
 
         getWdata MemStore {} wdata = Just wdata
         getWdata _           _     = Nothing
 
-        getWidth MemNone = 0
-        getWidth m       = width m
+        getWidth m = case m of
+          MemLoad  {} -> width m
+          MemStore {} -> width m
+          _           -> 0
 
-        memWidth = getWidth <$> access
-        memWdata = getWdata <$> access <*> wdata
+        memWidth = getWidth <$> action
+        memWdata = getWdata <$> action <*> wdata
 
         mem      = dataMem blobs memWidth memWdata addr
 
-        access'  = register def access
+        action'  = register def action
