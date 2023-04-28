@@ -1,10 +1,8 @@
 module CPU where
 
-import qualified Data.List as L
 import Clash.Prelude
 
-import Data.Maybe (isJust, fromMaybe)
-import Data.Default
+import Data.Maybe (fromMaybe)
 
 import CPU.Types
 import CPU.RegFile
@@ -13,7 +11,6 @@ import CPU.ALU
 import CPU.Memory
 
 import Utils.Files
-import Utils
 
 progBlobs = ($(getBank "../t.bin" 0) :>
              $(getBank "../t.bin" 1) :>
@@ -22,85 +19,87 @@ progBlobs = ($(getBank "../t.bin" 0) :>
 
 pipelineFetch :: HiddenClockResetEnable dom
               => Signal dom (Maybe PC)
-              -> Signal dom (PC, InstRaw)
+              -> Signal dom (PC, Instruction)
 pipelineFetch jump = bundle (pc, instMem progBlobs <$> pc)
-  where pc = register 0 $ liftA2 fromMaybe (liftA2 (+) pc 4) jump
+  where pc = register 0 $ fromMaybe <$> (liftA2 (+) pc 4) <*> jump
 
 pipelineDecode :: HiddenClockResetEnable dom
-               => Signal dom (PC, InstRaw)
-               -> Signal dom (Maybe (RegIndex, MWordS))
-               -> Signal dom (PC, InstDecoded, MWordS, MWordS)
-pipelineDecode i wb = bundle (pc', instDecoded', rs1', rs2')
-  where (pc, instRaw) = unbundle i
-        instDecoded   = instDecode <$> instRaw
+               => Signal dom (PC, Instruction)               -- IF
+               -> Signal dom (InstCtrl)                      -- EX
+               -> Signal dom (Maybe (RegIndex, MWordS))      -- MEM (Writeback)
+               -> Signal dom (PC, InstCtrl, Vec 2 MWordS, MWordS)
+pipelineDecode i ex wb = bundle (pcR, instR, rsR, immR)
+  where (pc, raw) = unbundle i
 
-        (rs1, rs2)    = unbundle . regFile . bundle $ ( wb
-                                                      , (getRs1 <$> instDecoded)
-                                                      , (getRs2 <$> instDecoded) )
+        imm  = instImm <$> raw
+        inst = instDecode <$> raw
+        rs   = regFile wb $ getRs <$> inst
+
         -- regs:
-        pc'           = register def pc
-        instDecoded'  = register def instDecoded
-        rs1'          = register def rs1
-        rs2'          = register def rs2
+        pcR   = register def pc
+        instR = register def inst
+        rsR   = register def rs
+        immR  = register def imm
 
 pipelineExecute :: HiddenClockResetEnable dom
-                => Signal dom (PC, InstDecoded, MWordS, MWordS)
-                -> Signal dom (PC, InstDecoded, MWordS, MWordS)
-pipelineExecute i = bundle (pc', instDecoded', aluRes', rs2')
-  where (pc, instDecoded, rs1, rs2) = unbundle i
-        aluOp = actionOp <$> (getAct <$> instDecoded)
-        imm   = getImm <$> instDecoded
+                => Signal dom (PC, InstCtrl, Vec 2 MWordS, MWordS)   -- ID
+                -> Signal dom (MWordS)                               -- MEM
+                -> Signal dom (PC, InstCtrl, MWordS, MWordS)
+pipelineExecute i mem = bundle (pcR, instR, aluR, rs2R)
+  where (pc, inst, rs, imm) = unbundle i
 
-        -- prettier?
-        opand1 = let src = getSrc1 <$> instDecoded
-                 in aluSrcMux <$> src <*> rs1 <*> rs2 <*> imm <*> pc
-        opand2 = let src = getSrc2 <$> instDecoded
-                 in aluSrcMux <$> src <*> rs1 <*> rs2 <*> imm <*> pc
+        aluOp = actionOp <$> (getAct <$> inst)
 
-        aluRes = alu <$> aluOp <*> opand1 <*> opand2
+        opands = let srcs = bundle (rs, imm, pc, aluR, mem)
+                     aluSrcMux' src = aluSrcMux <$> src <*> srcs
+                 in bundle . map aluSrcMux' . unbundle $ getSrcs <$> inst
+
+        alu = getAlu <$> aluOp <*> opands
+        rs2 = (!! 1) <$> rs
 
         -- regs:
-        instDecoded' = register def instDecoded
-        pc'     = register def pc
-        aluRes' = register def aluRes
-        rs2'    = register def rs2
+        instR = register def inst
+        pcR   = register def pc
+        aluR  = register def alu
+        rs2R  = register def rs2
 
 pipelineMemory :: HiddenClockResetEnable dom
-               => Signal dom (PC, InstDecoded, MWordS, MWordS)
-               -> Signal dom (InstDecoded, Maybe MWordS)
-pipelineMemory i = bundle (instDecoded', out)
-  where (pc, instDecoded, aluRes, src) = unbundle i
+               => Signal dom (PC, InstCtrl, MWordS, MWordS) -- EX
+               -> Signal dom (InstCtrl, Maybe MWordS)
+pipelineMemory i = bundle (instR, out)
+  where (_, inst, alu, rs2) = unbundle i
 
-        action = getAct <$> instDecoded
-        rdata = dataMemSE progBlobs action src (fromIntegral <$> aluRes)
+        action = getAct <$> inst
+        rdata = dataMemSE progBlobs action rs2 (fromIntegral <$> alu)
 
-        -- regs:
-        aluRes'      = register def aluRes
-        instDecoded' = register def instDecoded
-
-        writebackMux inst alu mem = case getAct inst of
+        writebackMux inst alu mem = case getAct inst of -- TODO: Wrap into maybe in WB
           Nop         -> Nothing
           MemStore {} -> Nothing
           MemLoad {}  -> Just mem
           ArithLog _  -> Just alu
 
-        out = liftA3 writebackMux instDecoded' aluRes' rdata
+        -- regs:
+        aluR  = register def alu
+        instR = register def inst
 
-pipeline :: HiddenClockResetEnable dom => Signal dom (InstDecoded, Maybe MWordS)
+        out = liftA3 writebackMux instR aluR rdata
+
+pipeline :: HiddenClockResetEnable dom => Signal dom (InstCtrl, Maybe MWordS)
 pipeline = memory
   where fetch = pipelineFetch (pure Nothing)
-        decode = pipelineDecode fetch wbData
-        execute = pipelineExecute decode
+        decode = pipelineDecode fetch exInst memData'
+        execute = pipelineExecute decode (liftA2 fromMaybe (pure 0) memData)
         memory = pipelineMemory execute
 
-        (wbInst, wbData') = unbundle memory
-        wbReg = getRd <$> wbInst
-        wbData = liftA2 (\x y -> liftA2 (,) (pure x) y) wbReg wbData'
+        (_, exInst, _, _) = unbundle execute
+
+        (memInst, memData) = unbundle memory
+        memReg = getRd <$> memInst
+        memData' = (liftA2 . liftA2) (,) (pure <$> memReg) memData
 
 topEntity = exposeClockResetEnable @System $ pipeline
 
-sim = simulateN @System 30 pipeline' [1 :: Int]
-  where pipeline' _ = pipeline
+sim = sampleN @System 30 pipeline
 
 -- sim = L.zip [0..] $ L.take 10 $ simulate @System dataMem'' input
 --   where input = [ (2, Nothing, 0)

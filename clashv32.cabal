@@ -42,7 +42,8 @@ common common-options
     -- Prelude isn't imported by default as Clash offers Clash.Prelude
     NoImplicitPrelude
   ghc-options:
-    -Wall -Wcompat
+    -Wall -Wcompat -Wno-name-shadowing -Wno-incomplete-patterns
+    -Wno-type-defaults
     -haddock
 
     -- Plugins to support type-level constraint solving on naturals

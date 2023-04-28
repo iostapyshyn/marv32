@@ -15,9 +15,7 @@ import CPU.Decode
 import Utils
 import Data.Maybe
 
-import qualified Data.List as L
-
-instMem :: Vec 4 (MemBlob n 8) -> PC -> InstRaw
+instMem :: Vec 4 (MemBlob n 8) -> PC -> Instruction
 instMem blobs pc = (concatBitVector# . reverse) roms
   where index = shiftR pc 2
         rom i = asyncRomBlob (blobs !! i) index
@@ -46,10 +44,10 @@ byteIndex width addr i = whenMaybe index filter
 
 dataMem :: HiddenClockResetEnable dom
         => Vec 4 (MemBlob n 8)
-        -> Signal dom (Unsigned 2)    -- ^ Access width as an exponent of 2
-        -> Signal dom (Maybe MWordS)  -- ^ Word to write
-        -> Signal dom MAddr           -- ^ Address
-        -> Signal dom (BitVector 32)  -- ^ Read data
+        -> Signal dom (Unsigned 2)   -- ^ Access width as an exponent of 2
+        -> Signal dom (Maybe MWordS) -- ^ Word to write
+        -> Signal dom MAddr          -- ^ Address
+        -> Signal dom (BitVector 32) -- ^ Read data
 dataMem blobs width wdata addr = go
   where
     -- Data ready to read in the next clock cycle

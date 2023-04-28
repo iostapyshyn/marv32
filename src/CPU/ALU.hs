@@ -1,6 +1,6 @@
 module CPU.ALU
   ( AluOp (..)
-  , alu
+  , getAlu
   ) where
 
 import Clash.Prelude
@@ -11,8 +11,8 @@ data AluOp = AluAdd | AluSub | AluSll | AluSlt | AluSltu | AluAnd | AluOr
            | AluSrl | AluSra | AluXor
   deriving (Show, Generic, NFDataX)
 
-alu :: AluOp -> MWordS -> MWordS -> MWordS
-alu op a b =
+getAlu :: AluOp -> Vec 2 MWordS -> MWordS
+getAlu op (a :> b :> Nil) =
   case op of
     AluAdd  -> a + b
     AluSub  -> a - b
