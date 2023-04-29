@@ -6,6 +6,7 @@ module CPU.Decode
   , AluSrc (..)
   , InstAction (..)
   , actionOp
+  , hasWriteback
   , aluSrcMux
   ) where
 
@@ -27,6 +28,11 @@ instance Default InstAction where def = Nop
 actionOp :: InstAction -> AluOp
 actionOp (ArithLog x) = x
 actionOp _            = AluAdd
+
+hasWriteback :: InstAction -> Bool
+hasWriteback (ArithLog _) = True
+hasWriteback MemLoad {}   = True
+hasWriteback _            = False
 
 data AluSrc = SrcNil | SrcRs (Index 2) | SrcImm | SrcPC | SrcEx | SrcMem
   deriving (Show, Generic, NFDataX)
