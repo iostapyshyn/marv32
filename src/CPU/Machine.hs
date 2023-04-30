@@ -1,18 +1,32 @@
-module CPU.ALU
-  ( AluOp (..)
-  , getAlu
+module CPU.Machine
+  ( Instruction
+  , MWordU
+  , MWordS
+  , MAddr
+  , PC
+  , Register
+  , AluOp (..)
+  , runAlu
   ) where
 
 import Clash.Prelude
 
-import CPU.Types
+type Instruction = BitVector 32 -- Raw instruction
+
+type MWordU   = Unsigned 32 -- Machine word (Unsigned)
+type MWordS   = Signed 32   -- Machine word (Signed)
+
+type MAddr    = MWordU      -- Address line
+type PC       = MAddr       -- Program counter
+
+type Register = Unsigned 5  -- Register address
 
 data AluOp = AluAdd | AluSub | AluSll | AluSlt | AluSltu | AluAnd | AluOr
            | AluSrl | AluSra | AluXor
   deriving (Show, Generic, NFDataX)
 
-getAlu :: AluOp -> Vec 2 MWordS -> MWordS
-getAlu op (a :> b :> Nil) =
+runAlu :: AluOp -> Vec 2 MWordS -> MWordS
+runAlu op (a :> b :> Nil) =
   case op of
     AluAdd  -> a + b
     AluSub  -> a - b

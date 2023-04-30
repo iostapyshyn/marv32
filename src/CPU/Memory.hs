@@ -2,21 +2,36 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
 module CPU.Memory
-  ( instMem
-  , dataMem
-  , dataMemSE
+  ( registerFile
+  , instructionMemory
+  , dataMemory
+  , dataMemorySE
   ) where
 
 import Clash.Prelude
 
-import CPU.Types
-import CPU.Decode
+import CPU.Machine
+import CPU.Instruction
 
 import Utils
 import Data.Maybe
 
-instMem :: Vec 4 (MemBlob n 8) -> PC -> Instruction
-instMem blobs pc = (concatBitVector# . reverse) roms
+type RegFile = Vec 32 MWordS
+
+registerFile :: HiddenClockResetEnable dom
+        => Signal dom (Maybe (Register, MWordS)) -- ^ rd write port
+        -> Signal dom (Vec 2 Register)           -- ^ rs1, rs2 addrs
+        -> Signal dom (Vec 2 MWordS)             -- ^ rs1, rs2 datas
+registerFile rd rs = mealy f (repeat 0 :: RegFile) (bundle (rd, rs))
+  where -- Transfer function:
+    f s (rd, rs) = (s' rd, ( s' rd !! (rs !! 0) :>
+                             s' rd !! (rs !! 1) :> Nil))
+      where s' (Just (     0,      _)) = s -- r0 is always zero
+            s' (Just (rdAddr, rdData)) = replace rdAddr rdData s
+            s' (Nothing)               = s
+
+instructionMemory :: Vec 4 (MemBlob n 8) -> PC -> Instruction
+instructionMemory blobs pc = (concatBitVector# . reverse) roms
   where index = shiftR pc 2
         rom i = asyncRomBlob (blobs !! i) index
         roms  = (rom 0 :> rom 1 :> rom 2 :> rom 3 :> Nil)
@@ -30,7 +45,7 @@ bankIndex :: Unsigned 2      -- ^ Width of the memory access
           -> MAddr           -- ^ Start address
           -> Index 4         -- ^ Index of the memory bank
           -> Maybe (Index 4) -- ^ Index of the byte in the data word starting from LSB
-bankIndex width addr i = whenMaybe index filter
+bankIndex width addr i = whenMaybe filter index
   where index  = fromIntegral $ (4 - addr + fromIntegral i) `mod` 4
         filter = (shiftR index (fromIntegral width)) == 0
 
@@ -38,17 +53,17 @@ byteIndex :: Unsigned 2      -- ^ Width of the memory access
           -> MAddr           -- ^ Start address
           -> Index 4         -- ^ Index of the byte in the data word starting from LSB
           -> Maybe (Index 4) -- ^ Index of the memory bank for this byte
-byteIndex width addr i = whenMaybe index filter
+byteIndex width addr i = whenMaybe filter index
   where index  = fromIntegral $ (addr + fromIntegral i) `mod` 4
         filter = (shiftR i (fromIntegral width)) == 0
 
-dataMem :: HiddenClockResetEnable dom
+dataMemory :: HiddenClockResetEnable dom
         => Vec 4 (MemBlob n 8)
         -> Signal dom (Unsigned 2)   -- ^ Access width as an exponent of 2
         -> Signal dom (Maybe MWordS) -- ^ Word to write
         -> Signal dom MAddr          -- ^ Address
         -> Signal dom (BitVector 32) -- ^ Read data
-dataMem blobs width wdata addr = go
+dataMemory blobs width wdata addr = go
   where
     -- Data ready to read in the next clock cycle
     width' = register def width
@@ -90,13 +105,13 @@ signExtend2 width v = case width of
   1 -> signExtend $ slice d15 d0 v
   _ -> v
 
-dataMemSE :: HiddenClockResetEnable dom
+dataMemorySE :: HiddenClockResetEnable dom
           => Vec 4 (MemBlob n 8)
           -> Signal dom InstAction      -- ^ Information about the access
           -> Signal dom MWordS          -- ^ Word to write
           -> Signal dom MAddr           -- ^ Address
           -> Signal dom MWordS          -- ^ Read data
-dataMemSE blobs action wdata addr = unpack <$> (extend <$> action' <*> mem)
+dataMemorySE blobs action wdata addr = unpack <$> (extend <$> action' <*> mem)
   where extend MemLoad { width, sign = True } = signExtend2 width
         extend _                              = id
 
@@ -111,6 +126,6 @@ dataMemSE blobs action wdata addr = unpack <$> (extend <$> action' <*> mem)
         memWidth = getWidth <$> action
         memWdata = getWdata <$> action <*> wdata
 
-        mem      = dataMem blobs memWidth memWdata addr
+        mem      = dataMemory blobs memWidth memWdata addr
 
-        action'  = register def action
+        action'  = register Nop action

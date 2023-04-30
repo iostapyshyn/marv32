@@ -86,9 +86,14 @@ library
   import: common-options
   hs-source-dirs: src
   exposed-modules:
-    CPU
-    CPU.ALU CPU.Memory CPU.Decode CPU.Types CPU.RegFile
     Utils Utils.Files
+    CPU.Machine
+    CPU.Instruction
+    CPU.Memory
+    CPU
+  other-modules:
+    CPU.Instruction.Format
+    CPU.Instruction.Action
   default-language: Haskell2010
 
 executable create_rom

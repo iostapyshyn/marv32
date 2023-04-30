@@ -3,15 +3,13 @@ module CPU where
 import Clash.Prelude
 
 import Data.Maybe (fromMaybe)
-import Data.Monoid (Any)
 
-import CPU.Types
-import CPU.RegFile
-import CPU.Decode
-import CPU.ALU
+import CPU.Machine
+import CPU.Instruction
 import CPU.Memory
 
 import Utils.Files
+import Utils (whenMaybe)
 
 progBlobs = ($(getBank "../t.bin" 0) :>
              $(getBank "../t.bin" 1) :>
@@ -22,158 +20,108 @@ pipelineFetch :: HiddenClockResetEnable dom
               => Signal dom (Bool)
               -> Signal dom (Maybe PC)
               -> Signal dom (PC, Instruction)
-pipelineFetch stall jump = bundle (pcR, instR)
+pipelineFetch stall jump = bundle (idPC, idInst)
   where
     en = not <$> stall
 
     pc = regEn def en $ fromMaybe <$> (liftA2 (+) pc 4) <*> jump
-    inst = instMem progBlobs <$> pc
+    inst = instructionMemory progBlobs <$> pc
 
-    -- regs:
-    pcR   = regEn def en pc
-    instR = regEn nop en inst
+    -- IF/ID regs:
+    idPC   = regEn def en pc
+    idInst = regEn nop en inst
       where nop = 0x00000013
 
 pipelineDecode :: HiddenClockResetEnable dom
                => Signal dom (PC, Instruction)                      -- ID
                -> Signal dom (InstCtrl)                             -- MEM
-               -> Signal dom (Maybe (RegIndex, MWordS))             -- WB
+               -> Signal dom (Maybe (Register, MWordS))             -- WB
                -> ( Signal dom (PC, InstCtrl, Vec 2 MWordS, MWordS) -- EX
                   , Signal dom (Bool) )                             -- Stall?
-pipelineDecode id mem wb = (bundle (pcR, instR, rsR, immR), stall)
+pipelineDecode id memInst wb = (bundle (exPC, exInst, exRegs, exImm), stall)
   where
     (pc, raw) = unbundle id
 
-    imm  = instImm <$> raw
-    inst = instDecode <$> raw
-    rs   = regFile wb $ getRs <$> inst
+    imm  = getImm <$> raw
+    inst = decode <$> raw
+    regs = registerFile wb (srcRegs <$> inst)
 
-    writesReg inst rd = hasWriteback (getAct inst) &&
-                        getRd inst == rd
+    stall = needStall <$> inst <*> exInst
 
-    needStall :: InstCtrl -- This instruction
-              -> InstCtrl -- Instruction in EX
-              -> Bool
-    needStall this ex@(InstCtrl { getAct = MemLoad {} }) = or $ map go (getSrcs this)
-      where
-        go src@(SrcRs i) = writesReg ex (getRs this !! i)
-        go src = False
-    needStall _ _ = False
+    instWithStall  = mux stall (pure def) inst
+    instWithBypass = withBypass <$> instWithStall <*> exInst <*> memInst
 
-    stall = needStall <$> inst <*> instR
-    inst' = mux stall (pure def) inst
-
-    bypass :: InstCtrl -- This instruction
-           -> InstCtrl -- Instruction in EX
-           -> InstCtrl -- Instruction in MEM
-           -> InstCtrl
-    bypass this ex mem = this { getSrcs = map go (getSrcs this) }
-      where
-        go src@(SrcRs i)
-          | writesReg ex  rs = SrcEx
-          | writesReg mem rs = SrcMem
-          | otherwise        = src
-          where rs = getRs this !! i
-        go src = src
-
-    inst'' = bypass <$> inst' <*> instR <*> mem
-
-    -- regs:
-    pcR   = register def pc
-    instR = register def inst''
-    rsR   = register def rs
-    immR  = register def imm
+    -- ID/EX regs:
+    exPC   = register def pc
+    exInst = register def instWithBypass
+    exRegs = register def regs
+    exImm  = register def imm
 
 pipelineExecute :: HiddenClockResetEnable dom
                 => Signal dom (PC, InstCtrl, Vec 2 MWordS, MWordS)   -- EX
                 -> Signal dom (MWordS)                               -- WB
-                -> Signal dom (PC, InstCtrl, MWordS, MWordS)         -- MEM
-pipelineExecute ex mem = bundle (pcR, instR, aluR, rs2R)
+                -> Signal dom (InstCtrl, MWordS, MWordS)             -- MEM
+pipelineExecute ex wbData = bundle (memInst, memAluRes, memRs2)
   where
-    (pc, inst, rs, imm) = unbundle ex
+    (pc, inst, regs, imm) = unbundle ex
 
-    aluOp = actionOp <$> (getAct <$> inst)
+    aluOp = getAluOp . action <$> inst
 
-    opands = let srcs = bundle (rs, imm, pc, aluR, mem)
-                 aluSrcMux' src = aluSrcMux <$> src <*> srcs
-             in bundle . map aluSrcMux' . unbundle $ getSrcs <$> inst
+    opands = bundle . map aluSrcMux' . unbundle
+           $ aluSrcs <$> inst
+      where aluSrcMux' src = aluSrcMux <$> src <*> srcs
+            srcs = bundle (regs, imm, pc, memAluRes, wbData)
 
-    alu = getAlu <$> aluOp <*> opands
-    rs2 = (!! 1) <$> rs
+    aluRes = runAlu <$> aluOp <*> opands
+    rs2 = (!! 1) <$> regs
 
-    -- regs:
-    instR = register def inst
-    pcR   = register def pc
-    aluR  = register def alu
-    rs2R  = register def rs2
+    -- EX/MEM regs:
+    memInst   = register def inst
+    memAluRes = register def aluRes
+    memRs2    = register def rs2
 
 pipelineMemory :: HiddenClockResetEnable dom
-               => Signal dom (PC, InstCtrl, MWordS, MWordS) -- MEM
-               -> Signal dom (InstCtrl, Maybe MWordS)       -- WB
-pipelineMemory mem = bundle (instR, out)
+               => Signal dom (InstCtrl, MWordS, MWordS) -- MEM
+               -> Signal dom (InstCtrl, MWordS)         -- WB
+pipelineMemory mem = bundle (wbInst, wbData)
   where
-    (_, inst, alu, rs2) = unbundle mem
+    (inst, aluRes, rs2) = unbundle mem
 
-    action = getAct <$> inst
-    rdata = dataMemSE progBlobs action rs2 (fromIntegral <$> alu)
+    act = action <$> inst
+    rdata = dataMemorySE progBlobs act rs2 (fromIntegral <$> aluRes)
 
-    writebackMux inst alu mem = case getAct inst of -- TODO: Wrap into maybe in WB
-      Nop         -> Nothing
-      MemStore {} -> Nothing
-      MemLoad {}  -> Just mem
-      ArithLog _  -> Just alu
+    -- MEM/WB regs:
+    wbAluRes = register def aluRes
+    wbInst   = register def inst
 
-    -- regs:
-    aluR  = register def alu
-    instR = register def inst
-
-    out = liftA3 writebackMux instR aluR rdata
+    wbData = liftA3 wbMux wbInst wbAluRes rdata
+      where
+        wbMux (InstCtrl { action = MemLoad {} }) _   mem = mem
+        wbMux _                                  alu _   = alu
 
 pipeline :: HiddenClockResetEnable dom
-         => Signal dom (Bool, Maybe MWordS, (PC, InstCtrl, Vec 2 MWordS, MWordS)) -- (InstCtrl, Maybe MWordS)
-pipeline = bundle (stall, wbData, decode) -- memory
+         => Signal dom (Bool, MWordS, (PC, InstCtrl, Vec 2 MWordS, MWordS))
+pipeline = bundle (stall, wbData, ex)
   where
-    fetch = pipelineFetch stall (pure Nothing)
-    (decode, stall) = pipelineDecode fetch exInst wbData'
-    execute = pipelineExecute decode (liftA2 fromMaybe (pure 0) wbData)
-    memory = pipelineMemory execute
+    -- Instruction fetch
+    id = pipelineFetch stall (pure Nothing)
 
-    (_, exInst, _, _) = unbundle execute
+    -- Instruction decode
+    (ex, stall) = pipelineDecode id memInst wbMaybe
 
-    (wbInst, wbData) = unbundle memory
-    wbReg = getRd <$> wbInst
-    wbData' = (liftA2 . liftA2) (,) (pure <$> wbReg) wbData
+    -- Execute
+    mem = pipelineExecute ex wbData
+    (memInst, _, _) = unbundle mem
+
+    -- Memory and writeback
+    wb = pipelineMemory mem
+
+    (wbInst, wbData) = unbundle wb
+    wbReg = dstReg <$> wbInst
+
+    wbRegData = liftA2 (,) wbReg wbData
+    wbMaybe = liftA2 (whenMaybe . writesBack . action) wbInst wbRegData
 
 topEntity = exposeClockResetEnable @System $ pipeline
 
 sim = sampleN @System 30 $ pipeline
-  where
-    stall = fromList [ False
-                     , False
-                     , False
-                     , True
-                     , True
-                     , True
-                     , True
-                     , False
-                     , False
-                     , False
-                     , False
-                     , False
-                     , False
-                     , False
-                     , False
-                     , False ]
-
--- sim = L.zip [0..] $ L.take 10 $ simulate @System dataMem'' input
---   where input = [ (2, Nothing, 0)
---                 , (2, Nothing, 0)
---                 , (0, Nothing, 0)
---                 , (0, Nothing, 0)
---                 , (0, Nothing, 0)
---                 , (0, Nothing, 0)
---                 , (0, Nothing, 0)
---                 , (0, Nothing, 0)
---                 ]
---         dataMem' (a,b,c) = pack <$> dataMem progBlobs a b c
---         dataMem'' x = dataMem' $ unbundle x
