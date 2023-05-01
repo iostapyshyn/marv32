@@ -9,6 +9,7 @@ module CPU.Instruction
   , needStall
   , withBypass
   , aluSrcMux
+  , doJump
   ) where
 
 import Clash.Prelude
@@ -40,6 +41,7 @@ decode raw =
   where (act, srcs) = actionSrcs raw
 
 writesReg :: InstCtrl -> Register -> Bool
+writesReg _    0  = False -- Writes to r0 are ignored anyway
 writesReg inst rd = (writesBack . action) inst &&
                     dstReg inst == rd
 

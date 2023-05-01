@@ -46,6 +46,7 @@ getFormat 0x67 = InstI
 getFormat 0x63 = InstB
 getFormat 0x23 = InstS
 getFormat 0x03 = InstI
+getFormat _    = InstR
 
 getImm :: Instruction -> MWordS
 getImm raw = unpack . go . getFormat . getOpcode $ raw
@@ -56,6 +57,8 @@ getImm raw = unpack . go . getFormat . getOpcode $ raw
     go InstS = signExtend (slice d31 d25 raw ++# slice d11 d7 raw)
     go InstU = signExtend (slice d31 d12 raw ++# (0 :: BitVector 12))
     go InstB = signExtend (slice d31 d31 raw ++# slice d7  d7 raw ++#
-                           slice d30 d25 raw ++# slice d11 d8 raw)
+                           slice d30 d25 raw ++# slice d11 d8 raw ++#
+                           (0 :: BitVector 1))
     go InstJ = signExtend (slice d31 d31 raw ++# slice d19 d12 raw ++#
-                           slice d20 d20 raw ++# slice d30 d21 raw)
+                           slice d20 d20 raw ++# slice d30 d21 raw ++#
+                           (0 :: BitVector 1))
