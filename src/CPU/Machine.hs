@@ -11,15 +11,15 @@ module CPU.Machine
 
 import Clash.Prelude
 
-type Instruction = BitVector 32 -- Raw instruction
+type Instruction = BitVector 32 -- ^ Raw instruction
 
-type MWordU   = Unsigned 32 -- Machine word (Unsigned)
-type MWordS   = Signed 32   -- Machine word (Signed)
+type MWordU   = Unsigned 32 -- ^ Machine word (Unsigned)
+type MWordS   = Signed 32   -- ^ Machine word (Signed)
 
-type MAddr    = MWordU      -- Address line
-type PC       = MAddr       -- Program counter
+type MAddr    = MWordU      -- ^ Address line
+type PC       = MAddr       -- ^ Program counter
 
-type Register = Unsigned 5  -- Register address
+type Register = Unsigned 5  -- ^ Register address
 
 data AluOp = AluAdd | AluSub | AluSll | AluSlt | AluSltu | AluAnd | AluOr
            | AluSrl | AluSra | AluXor | AluMul | AluMulh | AluMulhsu | AluMulhu

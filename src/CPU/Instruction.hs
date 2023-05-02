@@ -1,69 +1,72 @@
 module CPU.Instruction
   ( Instruction
-  , InstAction (..)
-  , getAluOp
-  , writesBack
+  , A.InstAction (..)
   , InstCtrl (..)
-  , decode
-  , getImm
+  , decodeInst
+  , F.getImm
+  , A.instAluOp
+  , A.writesBack
   , needStall
   , withBypass
-  , aluSrcMux
-  , doJump
   , bypassRegs
+  , aluSrcMux
+  , A.writebackMux
+  , A.runJump
   ) where
 
 import Clash.Prelude
 
 import CPU.Machine
 
-import CPU.Instruction.Format
-import CPU.Instruction.Action
+import qualified CPU.Instruction.Format as F
+import qualified CPU.Instruction.Action as A
 
-data RegForw = ForwMem | ForwWB
+data RegForw = ForwNone | ForwMem | ForwWB
   deriving (Show, Generic, NFDataX)
 
 data InstCtrl = InstCtrl
-  { action  :: InstAction            -- ^ Architectural effect
-  , aluSrcs :: Vec 2 AluSrc          -- ^ ALU sources
+  { action  :: A.InstAction          -- ^ Architectural effect
+  , aluSrcs :: Vec 2 A.AluSrc        -- ^ ALU sources
   , srcRegs :: Vec 2 Register        -- ^ Source registers
-  , regForw :: Vec 2 (Maybe RegForw) -- ^ Forwarding info
+  , regForw :: Vec 2 RegForw         -- ^ Forwarding info
   , dstReg  :: Register              -- ^ Destination register
   } deriving (Show, Generic, NFDataX)
 
 instance Default InstCtrl where
-  def = InstCtrl { action  = Nop
-                 , aluSrcs = repeat SrcZero
+  def = InstCtrl { action  = A.Nop
+                 , aluSrcs = repeat A.Src0
                  , srcRegs = repeat 0
-                 , regForw = repeat Nothing
+                 , regForw = repeat ForwNone
                  , dstReg  = 0 }
 
-decode :: Instruction -> InstCtrl
-decode raw =
+-- | Decode instruction and return control info
+decodeInst :: Instruction -> InstCtrl
+decodeInst raw =
   InstCtrl { action  = act
            , aluSrcs = srcs
-           , srcRegs = getSrcRegs raw
-           , regForw = repeat Nothing
-           , dstReg  = getDstReg raw }
-  where (act, srcs) = actionSrcs raw
+           , srcRegs = F.getSrcRegs raw
+           , regForw = repeat ForwNone
+           , dstReg  = F.getDstReg raw }
+  where (act, srcs) = A.decodeAction raw
 
+-- | Return whether instruction writes to the specified register
 writesReg :: InstCtrl -> Register -> Bool
 writesReg _    0  = False -- Writes to r0 are ignored anyway
-writesReg inst rd = (writesBack . action) inst &&
+writesReg inst rd = (A.writesBack . action) inst &&
                     dstReg inst == rd
 
--- Stall needed if data from preceeding load is required
+-- | Return whether stall needed is necessary after load
 needStall :: InstCtrl -- ^ Current instruction
           -> InstCtrl -- ^ Preceeding instruction in EX
           -> Bool
 needStall this ex = case ex of
-  InstCtrl { action = MemLoad {} } -> or . map go . aluSrcs $ this
-  _                                -> False
+  InstCtrl { action = A.MemLoad {} } -> or . map go . aluSrcs $ this
+  _                                  -> False
   where
-    go (SrcRs i) = writesReg ex (srcRegs this !! i)
-    go _         = False
+    go (A.SrcReg i) = writesReg ex (srcRegs this !! i)
+    go _            = False
 
--- Forward results from a preceeding instruction
+-- | Adjust the control lines to forward results from preceeding instructions
 withBypass :: InstCtrl -- ^ Current instruction
            -> InstCtrl -- ^ Instruction in EX
            -> InstCtrl -- ^ Instruction in MEM
@@ -71,18 +74,26 @@ withBypass :: InstCtrl -- ^ Current instruction
 withBypass this ex mem = this { regForw = imap go . regForw $ this }
   where
     go i _
-      | writesReg ex  rs = Just ForwMem
-      | writesReg mem rs = Just ForwWB
-      | otherwise        = Nothing
+      | writesReg ex  rs = ForwMem
+      | writesReg mem rs = ForwWB
+      | otherwise        = ForwNone
       where rs = srcRegs this !! i
 
-bypassRegs :: Vec 2 (Maybe RegForw)   -- ^ Forwarding
-           -> Vec 2 MWordS            -- ^ Original register values
-           -> MWordS                  -- ^ Value in memory phase
-           -> MWordS                  -- ^ Value in writeback phase
+-- | Override register contents with forwarded data
+bypassRegs :: Vec 2 RegForw -- ^ Forwarding
+           -> Vec 2 MWordS  -- ^ Original register values
+           -> MWordS        -- ^ Value in memory phase
+           -> MWordS        -- ^ Value in writeback phase
            -> Vec 2 MWordS
 bypassRegs forw regs mem wb = zipWith sel forw regs
   where
-    sel (Nothing) reg    = reg
-    sel (Just ForwMem) _ = mem
-    sel (Just ForwWB)  _ = wb
+    sel ForwNone reg = reg
+    sel ForwMem  _   = mem
+    sel ForwWB   _   = wb
+
+aluSrcMux :: Vec 2 A.AluSrc -- ^ ALU sources
+          -> Vec 2 MWordS   -- ^ Registers
+          -> MWordS         -- ^ Immediate
+          -> PC             -- ^ PC
+          -> Vec 2 MWordS
+aluSrcMux srcs regs imm pc = map (A.aluSrcMux regs imm pc) srcs

@@ -1,11 +1,12 @@
 module CPU.Instruction.Action
   ( InstAction (..)
-  , getAluOp
-  , writesBack
   , AluSrc (..)
+  , instAluOp
+  , writesBack
   , aluSrcMux
-  , actionSrcs
-  , doJump
+  , writebackMux
+  , decodeAction
+  , runJump
   ) where
 
 import Clash.Prelude
@@ -13,8 +14,8 @@ import Clash.Prelude
 import CPU.Machine
 import CPU.Instruction.Format
 
-data AluSrc = SrcZero | Src4 | SrcRs (Index 2)
-            | SrcImm | SrcPC
+-- | Possible sources for the ALU input
+data AluSrc = Src0 | Src4 | SrcReg (Index 2) | SrcImm | SrcPC
   deriving (Show, Generic, NFDataX)
 
 aluSrcMux :: Vec 2 MWordS -- ^ Registers
@@ -23,12 +24,13 @@ aluSrcMux :: Vec 2 MWordS -- ^ Registers
           -> AluSrc       -- ^ Source
           -> MWordS
 aluSrcMux regs imm pc src = case src of
-  SrcZero -> 0
-  Src4    -> 4
-  SrcRs i -> regs !! i
-  SrcImm  -> imm
-  SrcPC   -> fromIntegral pc
+  Src0     -> 0
+  Src4     -> 4
+  SrcReg i -> regs !! i
+  SrcImm   -> imm
+  SrcPC    -> fromIntegral pc
 
+-- | Instruction semantics
 data InstAction = Nop
                 | ArithLog AluOp
                 | MemLoad { width :: Unsigned 2
@@ -38,45 +40,52 @@ data InstAction = Nop
                 | Branch Bool AluOp
   deriving (Show, Generic, NFDataX)
 
-getAluOp :: InstAction -> AluOp
-getAluOp (ArithLog x) = x
-getAluOp (Branch _ x) = x
-getAluOp _            = AluAdd
+-- | Get corresponding ALU operation from the instruction semantics
+instAluOp :: InstAction -> AluOp
+instAluOp (ArithLog x) = x
+instAluOp (Branch _ x) = x
+instAluOp _            = AluAdd
 
+-- | Return whether instruction involves a writeback
 writesBack :: InstAction -> Bool
 writesBack (ArithLog _) = True
 writesBack (MemLoad {}) = True
 writesBack (Jump _)     = True
 writesBack _            = False
 
-doJump :: InstAction
-       -> MWordS       -- ALU result
-       -> PC           -- PC
-       -> Vec 2 MWordS -- Registers
-       -> MWordS       -- Immediate
-       -> Maybe PC
-doJump inst aluRes pc regs imm = case inst of
+writebackMux :: InstAction -> MWordS -> MWordS -> MWordS
+writebackMux MemLoad {} _ mem = mem
+writebackMux _          alu _ = alu
+
+-- | Evaluate jump/branch depending on ALU result
+runJump :: InstAction   -- ^ Instruction type
+        -> MWordS       -- ^ ALU result
+        -> PC           -- ^ PC
+        -> Vec 2 MWordS -- ^ Registers
+        -> MWordS       -- ^ Immediate
+        -> Maybe PC     -- ^ New program counte
+runJump inst aluRes pc regs imm = case inst of
   Jump Nothing  -> Just $ pc + fromIntegral imm
   Jump (Just i) -> Just . fromIntegral $ (regs !! i) + imm
   Branch cond _ | (aluRes /= 0) == cond
                 -> Just $ pc + fromIntegral imm
   _             -> Nothing
 
-
-actionSrcs :: Instruction -> (InstAction, Vec 2 AluSrc)
-actionSrcs raw =
+-- | Extract semantics and ALU operand sources from instruction
+decodeAction :: Instruction -> (InstAction, Vec 2 AluSrc)
+decodeAction raw =
   case opcode of
-    0x13 -> (ArithLog iAluOp, SrcRs 0 :> SrcImm  :> Nil)
-    0x33 -> (ArithLog rAluOp, SrcRs 0 :> SrcRs 1 :> Nil)
-    0x37 -> (ArithLog AluAdd, SrcZero :> SrcImm  :> Nil) -- lui
-    0x17 -> (ArithLog AluAdd, SrcPC   :> SrcImm  :> Nil) -- auipc
-    0x03 -> (memLoad,         SrcRs 0 :> SrcImm  :> Nil)
-    0x23 -> (memStore,        SrcRs 0 :> SrcImm  :> Nil)
-    0x6F -> (Jump $ Nothing,  SrcPC   :> Src4    :> Nil) -- jal
-    0x67 -> (Jump $ Just 0,   SrcPC   :> Src4    :> Nil) -- jalr
-    0x63 -> (branch,          SrcRs 0 :> SrcRs 1 :> Nil)
-    0x0F -> (Nop,             SrcZero :> SrcZero :> Nil) -- fence
-    0x73 -> (Nop,             SrcZero :> SrcZero :> Nil) -- ecall/ebreak
+    0x13 -> (ArithLog iAluOp, SrcReg 0 :> SrcImm   :> Nil)
+    0x33 -> (ArithLog rAluOp, SrcReg 0 :> SrcReg 1 :> Nil)
+    0x37 -> (ArithLog AluAdd, Src0     :> SrcImm   :> Nil) -- lui
+    0x17 -> (ArithLog AluAdd, SrcPC    :> SrcImm   :> Nil) -- auipc
+    0x03 -> (memLoad,         SrcReg 0 :> SrcImm   :> Nil)
+    0x23 -> (memStore,        SrcReg 0 :> SrcImm   :> Nil)
+    0x6F -> (Jump $ Nothing,  SrcPC    :> Src4     :> Nil) -- jal
+    0x67 -> (Jump $ Just 0,   SrcPC    :> Src4     :> Nil) -- jalr
+    0x63 -> (branch,          SrcReg 0 :> SrcReg 1 :> Nil)
+    0x0F -> (Nop,             Src0     :> Src0     :> Nil) -- fence
+    0x73 -> (Nop,             Src0     :> Src0     :> Nil) -- ecall/ebreak
   where
     branch = case funct3 of
       0x0 -> Branch False AluXor                       -- beq

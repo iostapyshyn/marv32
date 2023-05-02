@@ -9,7 +9,7 @@ import CPU.Instruction
 import CPU.Memory
 
 import Utils.Files
-import Utils (whenMaybe, liftA4)
+import Utils (whenMaybe)
 
 progBlobs = ($(getBank "../fib2.bin" 0) :>
              $(getBank "../fib2.bin" 1) :>
@@ -46,7 +46,7 @@ pipelineDecode id flush memInst wb = (bundle (exPC, exInst, exRegs, exImm), stal
     (pc, raw) = unbundle id
 
     imm  = getImm <$> raw
-    inst = decode <$> raw
+    inst = decodeInst <$> raw
     regs = registerFile wb (srcRegs <$> inst)
 
     stall = needStall <$> inst <*> exInst
@@ -70,7 +70,7 @@ pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), ifJump)
   where
     (pc, inst, regs, imm) = unbundle ex
 
-    aluOp = getAluOp . action <$> inst
+    aluOp = instAluOp . action <$> inst
 
     -- Possibly override register contents with forwarded data
     regs' = bypassRegs <$> (regForw <$> inst)
@@ -79,16 +79,16 @@ pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), ifJump)
                        <*> wbData
 
     -- Select proper inputs for the ALU
-    opands = bundle
-           . map (liftA4 aluSrcMux regs' imm pc)
-           . unbundle
-           . fmap aluSrcs $ inst
+    opands = aluSrcMux <$> (aluSrcs <$> inst)
+                       <*> regs'
+                       <*> imm
+                       <*> pc
 
     aluRes = runAlu <$> aluOp <*> opands
     rs2 = (!! 1) <$> regs'
 
     -- Don't pipeline as this is forwarded directly into PC register
-    ifJump = doJump . action <$> inst <*> aluRes <*> pc <*> regs' <*> imm
+    ifJump = runJump . action <$> inst <*> aluRes <*> pc <*> regs' <*> imm
 
     -- EX/MEM regs:
     memInst   = register def inst
@@ -109,10 +109,7 @@ pipelineMemory mem = bundle (wbInst, wbData)
     wbAluRes = register def aluRes
     wbInst   = register def inst
 
-    wbData = liftA3 wbMux wbInst wbAluRes rdata
-      where
-        wbMux (InstCtrl { action = MemLoad {} }) _   mem = mem
-        wbMux _                                  alu _   = alu
+    wbData = writebackMux . action <$> wbInst <*> wbAluRes <*> rdata
 
 pipeline :: HiddenClockResetEnable dom
          => Signal dom (Bool, MWordS, (PC, InstCtrl, Vec 2 MWordS, MWordS), Maybe PC)
