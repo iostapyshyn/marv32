@@ -25,11 +25,11 @@ data RegForw = ForwNone | ForwMem | ForwWB
   deriving (Show, Generic, NFDataX)
 
 data InstCtrl = InstCtrl
-  { action  :: A.InstAction          -- ^ Architectural effect
-  , aluSrcs :: Vec 2 A.AluSrc        -- ^ ALU sources
-  , srcRegs :: Vec 2 Register        -- ^ Source registers
-  , regForw :: Vec 2 RegForw         -- ^ Forwarding info
-  , dstReg  :: Register              -- ^ Destination register
+  { action  :: A.InstAction     -- ^ Architectural effect
+  , aluSrcs :: Vec 2 A.AluSrc   -- ^ ALU sources
+  , srcRegs :: Vec 2 RegIndex   -- ^ Source registers
+  , regForw :: Vec 2 RegForw    -- ^ Forwarding info
+  , dstReg  :: RegIndex         -- ^ Destination register
   } deriving (Show, Generic, NFDataX)
 
 instance Default InstCtrl where
@@ -50,7 +50,7 @@ decodeInst raw =
   where (act, srcs) = A.decodeAction raw
 
 -- | Return whether instruction writes to the specified register
-writesReg :: InstCtrl -> Register -> Bool
+writesReg :: InstCtrl -> RegIndex -> Bool
 writesReg _    0  = False -- Writes to r0 are ignored anyway
 writesReg inst rd = (A.writesBack . action) inst &&
                     dstReg inst == rd
@@ -80,11 +80,11 @@ withBypass this ex mem = this { regForw = imap go . regForw $ this }
       where rs = srcRegs this !! i
 
 -- | Override register contents with forwarded data
-bypassRegs :: Vec 2 RegForw -- ^ Forwarding
-           -> Vec 2 MWordS  -- ^ Original register values
-           -> MWordS        -- ^ Value in memory phase
-           -> MWordS        -- ^ Value in writeback phase
-           -> Vec 2 MWordS
+bypassRegs :: Vec 2 RegForw  -- ^ Forwarding
+           -> Vec 2 RegValue -- ^ Original register values
+           -> AluResult      -- ^ Value in memory phase
+           -> RegValue       -- ^ Value in writeback phase
+           -> Vec 2 RegValue
 bypassRegs forw regs mem wb = zipWith sel forw regs
   where
     sel ForwNone reg = reg
@@ -92,8 +92,8 @@ bypassRegs forw regs mem wb = zipWith sel forw regs
     sel ForwWB   _   = wb
 
 aluSrcMux :: Vec 2 A.AluSrc -- ^ ALU sources
-          -> Vec 2 MWordS   -- ^ Registers
-          -> MWordS         -- ^ Immediate
+          -> Vec 2 RegValue -- ^ Registers
+          -> Immediate      -- ^ Immediate
           -> PC             -- ^ PC
-          -> Vec 2 MWordS
+          -> Vec 2 AluOpand
 aluSrcMux srcs regs imm pc = map (A.aluSrcMux regs imm pc) srcs

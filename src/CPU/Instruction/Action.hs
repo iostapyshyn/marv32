@@ -18,11 +18,11 @@ import CPU.Instruction.Format
 data AluSrc = Src0 | Src4 | SrcReg (Index 2) | SrcImm | SrcPC
   deriving (Show, Generic, NFDataX)
 
-aluSrcMux :: Vec 2 MWordS -- ^ Registers
-          -> MWordS       -- ^ Immediate
-          -> PC           -- ^ PC
-          -> AluSrc       -- ^ Source
-          -> MWordS
+aluSrcMux :: Vec 2 RegValue -- ^ Registers
+          -> Immediate      -- ^ Immediate
+          -> PC             -- ^ PC
+          -> AluSrc         -- ^ Source
+          -> AluOpand
 aluSrcMux regs imm pc src = case src of
   Src0     -> 0
   Src4     -> 4
@@ -36,7 +36,7 @@ data InstAction = Nop
                 | MemLoad { width :: Unsigned 2
                           , sign  :: Bool }
                 | MemStore { width :: Unsigned 2 }
-                | Jump (Maybe Register)
+                | Jump (Maybe RegIndex)
                 | Branch Bool AluOp
   deriving (Show, Generic, NFDataX)
 
@@ -53,17 +53,20 @@ writesBack (MemLoad {}) = True
 writesBack (Jump _)     = True
 writesBack _            = False
 
-writebackMux :: InstAction -> MWordS -> MWordS -> MWordS
+writebackMux :: InstAction -- ^ Instruction semantics
+             -> AluResult  -- ^ ALU result
+             -> MemData    -- ^ Data from memory
+             -> RegValue   -- ^ Output
 writebackMux MemLoad {} _ mem = mem
 writebackMux _          alu _ = alu
 
 -- | Evaluate jump/branch depending on ALU result
-runJump :: InstAction   -- ^ Instruction type
-        -> MWordS       -- ^ ALU result
-        -> PC           -- ^ PC
-        -> Vec 2 MWordS -- ^ Registers
-        -> MWordS       -- ^ Immediate
-        -> Maybe PC     -- ^ New program counte
+runJump :: InstAction     -- ^ Instruction semantics
+        -> AluResult      -- ^ ALU result
+        -> PC             -- ^ PC
+        -> Vec 2 RegValue -- ^ Registers
+        -> Immediate      -- ^ Immediate
+        -> Maybe PC       -- ^ New program counte
 runJump inst aluRes pc regs imm = case inst of
   Jump Nothing  -> Just $ pc + fromIntegral imm
   Jump (Just i) -> Just . fromIntegral $ (regs !! i) + imm

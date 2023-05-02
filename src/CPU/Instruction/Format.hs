@@ -30,10 +30,10 @@ getFunct7 = unpack . slice d31 d25
 getFunct3 :: Instruction -> Funct3
 getFunct3 = unpack . slice d14 d12
 
-getSrcRegs :: Instruction -> Vec 2 Register
+getSrcRegs :: Instruction -> Vec 2 RegIndex
 getSrcRegs i = map unpack (slice d19 d15 i :> slice d24 d20 i :> Nil)
 
-getDstReg :: Instruction -> Register
+getDstReg :: Instruction -> RegIndex
 getDstReg = unpack . slice d11 d7
 
 getFormat :: Opcode -> InstFormat

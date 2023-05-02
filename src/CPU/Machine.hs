@@ -4,7 +4,12 @@ module CPU.Machine
   , MWordS
   , MAddr
   , PC
-  , Register
+  , RegValue
+  , Immediate
+  , AluOpand
+  , AluResult
+  , MemData
+  , RegIndex
   , AluOp (..)
   , runAlu
   ) where
@@ -13,13 +18,18 @@ import Clash.Prelude
 
 type Instruction = BitVector 32 -- ^ Raw instruction
 
-type MWordU   = Unsigned 32 -- ^ Machine word (Unsigned)
-type MWordS   = Signed 32   -- ^ Machine word (Signed)
+type MWordU    = Unsigned 32 -- ^ Machine word (Unsigned)
+type MWordS    = Signed 32   -- ^ Machine word (Signed)
 
-type MAddr    = MWordU      -- ^ Address line
-type PC       = MAddr       -- ^ Program counter
+type MAddr     = MWordU      -- ^ Address line
+type PC        = MAddr       -- ^ Program counter
+type RegValue  = MWordS      -- ^ Value from a register
+type Immediate = MWordS      -- ^ Instruction immediate
+type AluOpand  = MWordS      -- ^ ALU operand
+type AluResult = MWordS      -- ^ ALU result
+type MemData   = MWordS      -- ^ Data from memory
 
-type Register = Unsigned 5  -- ^ Register address
+type RegIndex = Unsigned 5   -- ^ Register address
 
 data AluOp = AluAdd | AluSub | AluSll | AluSlt | AluSltu | AluAnd | AluOr
            | AluSrl | AluSra | AluXor | AluMul | AluMulh | AluMulhsu | AluMulhu
@@ -31,28 +41,30 @@ mulH a b = fromIntegral $ mulH64 (fromIntegral a) (fromIntegral b)
   where mulH64 :: Unsigned 64 -> Unsigned 64 -> Unsigned 64
         mulH64 a64 b64 = shiftR (a64 * b64) 32
 
-runAlu :: AluOp -> Vec 2 MWordS -> MWordS
+runAlu :: AluOp -> Vec 2 AluOpand -> AluResult
 runAlu op (a :> b :> Nil) =
   case op of
-    AluAdd  -> a + b
-    AluSub  -> a - b
-    AluMul  -> a * b
-    AluMulh  -> mulH a b
-    AluMulhsu -> mulH a b'
-    AluMulhu -> mulH a' b'
-    AluDiv  -> a `div` b
-    AluRem  -> a `rem` b
-    AluDivu -> fromIntegral $ a' `div` b'
-    AluRemu -> fromIntegral $ a' `rem` b'
-    AluSll  -> shiftL a bint
+    AluAdd  -> as + bs
+    AluSub  -> as - bs
+    AluMul  -> as * bs
+    AluMulh   -> mulH as bs
+    AluMulhsu -> mulH as bu
+    AluMulhu  -> mulH au bu
+    AluDiv  -> as `div` bs
+    AluRem  -> as `rem` bs
+    AluDivu -> fromIntegral $ au `div` bu
+    AluRemu -> fromIntegral $ au `rem` bu
+    AluSll  -> shiftL as bi
     AluSrl  -> fromIntegral $
-               shiftR a' bint
-    AluSra  -> shiftR a bint
-    AluSlt  -> if a  < b  then 1 else 0
-    AluSltu -> if a' < b' then 1 else 0
-    AluAnd  -> a .&. b
-    AluXor  -> xor a b
-    AluOr   -> a .|. b
-  where a' = fromIntegral a :: MWordU -- unsigned
-        b' = fromIntegral b :: MWordU -- unsigned
-        bint = fromIntegral b :: Int  -- generic
+               shiftR au bi
+    AluSra  -> shiftR as bi
+    AluSlt  -> if as < bs  then 1 else 0
+    AluSltu -> if au < bu then 1 else 0
+    AluAnd  -> as .&. bs
+    AluXor  -> xor as bs
+    AluOr   -> as .|. bs
+  where as = fromIntegral a :: MWordS -- signed
+        au = fromIntegral a :: MWordU -- unsigned
+        bs = fromIntegral b :: MWordS -- signed
+        bu = fromIntegral b :: MWordU -- unsigned
+        bi = fromIntegral b :: Int    -- for shift

@@ -27,20 +27,21 @@ pipelineFetch stall jump = bundle (idPC, idInst)
     pc = regEn def en $ fromMaybe <$> (liftA2 (+) pc 4) <*> jump
     inst = instructionMemory progBlobs <$> pc
 
+    -- Flush fetched instruction on jump
     nop = 0x00000013
-    instWithFlush = mux (isJust <$> jump) (pure nop) inst
+    inst' = mux (isJust <$> jump) (pure nop) inst
 
     -- IF/ID regs:
     idPC   = regEn def en pc
-    idInst = regEn nop en instWithFlush
+    idInst = regEn nop en inst'
 
 pipelineDecode :: HiddenClockResetEnable dom
-               => Signal dom (PC, Instruction)                      -- id
-               -> Signal dom (Bool)                                 -- flush on jump
-               -> Signal dom (InstCtrl)                             -- mem
-               -> Signal dom (Maybe (Register, MWordS))             -- wb
-               -> ( Signal dom (PC, InstCtrl, Vec 2 MWordS, MWordS) -- ex
-                  , Signal dom (Bool) )                             -- stall?
+               => Signal dom (PC, Instruction)                           -- id
+               -> Signal dom (Bool)                                      -- flush on jump
+               -> Signal dom (InstCtrl)                                  -- mem
+               -> Signal dom (Maybe (RegIndex, RegValue))                -- wb
+               -> ( Signal dom (PC, InstCtrl, Vec 2 RegValue, Immediate) -- ex
+                  , Signal dom (Bool) )                                  -- stall?
 pipelineDecode id flush memInst wb = (bundle (exPC, exInst, exRegs, exImm), stall)
   where
     (pc, raw) = unbundle id
@@ -50,27 +51,28 @@ pipelineDecode id flush memInst wb = (bundle (exPC, exInst, exRegs, exImm), stal
     regs = registerFile wb (srcRegs <$> inst)
 
     stall = needStall <$> inst <*> exInst
-    stallOrFlush = (||) <$> stall <*> flush
 
-    instWithStall  = mux stallOrFlush (pure def) inst
-    instWithBypass = withBypass <$> instWithStall <*> exInst <*> memInst
+    -- Insert nop when stalling or flushing
+    inst'  = mux cond (pure def) inst
+      where cond = (||) <$> stall <*> flush
+
+    -- Adjust for forwarding if needed
+    inst'' = withBypass <$> inst' <*> exInst <*> memInst
 
     -- ID/EX regs:
     exPC   = register def pc
-    exInst = register def instWithBypass
+    exInst = register def inst''
     exRegs = register def regs
     exImm  = register def imm
 
 pipelineExecute :: HiddenClockResetEnable dom
-                => Signal dom (PC, InstCtrl, Vec 2 MWordS, MWordS)   -- ex
-                -> Signal dom (MWordS)                               -- wb
-                -> ( Signal dom (InstCtrl, MWordS, MWordS)           -- mem
-                   , Signal dom (Maybe PC) )                         -- jump?
-pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), ifJump)
+                => Signal dom (PC, InstCtrl, Vec 2 RegValue, Immediate) -- ex
+                -> Signal dom (RegValue)                                -- wb
+                -> ( Signal dom (InstCtrl, AluResult, RegValue)         -- mem
+                   , Signal dom (Maybe PC) )                            -- jump?
+pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), jumpPC)
   where
     (pc, inst, regs, imm) = unbundle ex
-
-    aluOp = instAluOp . action <$> inst
 
     -- Possibly override register contents with forwarded data
     regs' = bypassRegs <$> (regForw <$> inst)
@@ -84,11 +86,15 @@ pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), ifJump)
                        <*> imm
                        <*> pc
 
+    aluOp = instAluOp . action <$> inst
     aluRes = runAlu <$> aluOp <*> opands
-    rs2 = (!! 1) <$> regs'
 
-    -- Don't pipeline as this is forwarded directly into PC register
-    ifJump = runJump . action <$> inst <*> aluRes <*> pc <*> regs' <*> imm
+    -- Decision whether to jump is taken here.
+    -- Don't pipeline the result as it is fed directly into PC register
+    jumpPC = runJump . action <$> inst <*> aluRes <*> pc <*> regs' <*> imm
+
+    -- Rs2 for memory stores
+    rs2 = (!! 1) <$> regs'
 
     -- EX/MEM regs:
     memInst   = register def inst
@@ -96,8 +102,8 @@ pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), ifJump)
     memRs2    = register def rs2
 
 pipelineMemory :: HiddenClockResetEnable dom
-               => Signal dom (InstCtrl, MWordS, MWordS) -- mem
-               -> Signal dom (InstCtrl, MWordS)         -- wb
+               => Signal dom (InstCtrl, AluResult, RegValue) -- mem
+               -> Signal dom (InstCtrl, RegValue)            -- wb
 pipelineMemory mem = bundle (wbInst, wbData)
   where
     (inst, aluRes, rs2) = unbundle mem
@@ -109,32 +115,36 @@ pipelineMemory mem = bundle (wbInst, wbData)
     wbAluRes = register def aluRes
     wbInst   = register def inst
 
+    -- Load data comes in the next clock cycle
     wbData = writebackMux . action <$> wbInst <*> wbAluRes <*> rdata
 
 pipeline :: HiddenClockResetEnable dom
          => Signal dom (Bool, MWordS, (PC, InstCtrl, Vec 2 MWordS, MWordS), Maybe PC)
 pipeline = bundle (stall, wbData, ex, jump)
   where
-    -- Instruction fetch
+    -- Instruction fetch phase
     id = pipelineFetch stall jump
 
-    -- Instruction decode
-    (ex, stall) = pipelineDecode id flush memInst wbMaybe
+    -- Instruction decode phase
+    (ex, stall) = pipelineDecode id flush memInst wbRegData
 
-    -- Execute
+    -- Execute phase
     (mem, jump) = pipelineExecute ex wbData
     (memInst, _, _) = unbundle mem
 
     flush = isJust <$> jump
 
-    -- Memory and writeback
+    -- Memory and writeback phases
     wb = pipelineMemory mem
 
     (wbInst, wbData) = unbundle wb
     wbReg = dstReg <$> wbInst
 
-    wbRegData = liftA2 (,) wbReg wbData
-    wbMaybe = liftA2 (whenMaybe . writesBack . action) wbInst wbRegData
+    -- Wrap into a Maybe together with target register
+    wbRegData = whenMaybe
+              . writesBack
+              . action <$> wbInst
+                       <*> ((,) <$> wbReg <*> wbData)
 
 topEntity = exposeClockResetEnable @System $ pipeline
 

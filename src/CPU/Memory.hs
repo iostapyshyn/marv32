@@ -19,9 +19,9 @@ import Data.Maybe
 type RegFile = Vec 32 MWordS
 
 registerFile :: HiddenClockResetEnable dom
-        => Signal dom (Maybe (Register, MWordS)) -- ^ rd write port
-        -> Signal dom (Vec 2 Register)           -- ^ rs1, rs2 addrs
-        -> Signal dom (Vec 2 MWordS)             -- ^ rs1, rs2 datas
+        => Signal dom (Maybe (RegIndex, RegValue)) -- ^ rd write port
+        -> Signal dom (Vec 2 RegIndex)             -- ^ rs1, rs2 addrs
+        -> Signal dom (Vec 2 RegValue)             -- ^ rs1, rs2 datas
 registerFile rd rs = mealy f (repeat 0 :: RegFile) (bundle (rd, rs))
   where -- Transfer function:
     f s (rd, rs) = (s' rd, ( s' rd !! (rs !! 0) :>
@@ -110,7 +110,7 @@ dataMemorySE :: HiddenClockResetEnable dom
           -> Signal dom InstAction      -- ^ Information about the access
           -> Signal dom MWordS          -- ^ Word to write
           -> Signal dom MAddr           -- ^ Address
-          -> Signal dom MWordS          -- ^ Read data
+          -> Signal dom MemData         -- ^ Read data
 dataMemorySE blobs action wdata addr = unpack <$> (extend <$> action' <*> mem)
   where extend MemLoad { width, sign = True } = signExtend2 width
         extend _                              = id
