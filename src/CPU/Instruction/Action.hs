@@ -14,24 +14,20 @@ import CPU.Machine
 import CPU.Instruction.Format
 
 data AluSrc = SrcZero | Src4 | SrcRs (Index 2)
-            | SrcImm | SrcPC | SrcMem | SrcWB
+            | SrcImm | SrcPC
   deriving (Show, Generic, NFDataX)
 
-aluSrcMux :: AluSrc
-          -> ( Vec 2 MWordS -- ^ Registers
-             , MWordS       -- ^ Immediate
-             , PC           -- ^ PC
-             , MWordS       -- ^ Memory stage
-             , MWordS )     -- ^ Writeback stage
+aluSrcMux :: Vec 2 MWordS -- ^ Registers
+          -> MWordS       -- ^ Immediate
+          -> PC           -- ^ PC
+          -> AluSrc       -- ^ Source
           -> MWordS
-aluSrcMux src (regs,imm,pc,mem,wb) = case src of
+aluSrcMux regs imm pc src = case src of
   SrcZero -> 0
   Src4    -> 4
   SrcRs i -> regs !! i
   SrcImm  -> imm
   SrcPC   -> fromIntegral pc
-  SrcMem  -> mem
-  SrcWB   -> wb
 
 data InstAction = Nop
                 | ArithLog AluOp

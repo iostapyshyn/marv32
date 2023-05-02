@@ -10,6 +10,7 @@ module CPU.Instruction
   , withBypass
   , aluSrcMux
   , doJump
+  , bypassRegs
   ) where
 
 import Clash.Prelude
@@ -19,17 +20,22 @@ import CPU.Machine
 import CPU.Instruction.Format
 import CPU.Instruction.Action
 
+data RegForw = ForwMem | ForwWB
+  deriving (Show, Generic, NFDataX)
+
 data InstCtrl = InstCtrl
-  { action  :: InstAction     -- ^ Architectural effect
-  , aluSrcs :: Vec 2 AluSrc   -- ^ ALU sources
-  , srcRegs :: Vec 2 Register -- ^ Source registers
-  , dstReg  :: Register       -- ^ Destination register
+  { action  :: InstAction            -- ^ Architectural effect
+  , aluSrcs :: Vec 2 AluSrc          -- ^ ALU sources
+  , srcRegs :: Vec 2 Register        -- ^ Source registers
+  , regForw :: Vec 2 (Maybe RegForw) -- ^ Forwarding info
+  , dstReg  :: Register              -- ^ Destination register
   } deriving (Show, Generic, NFDataX)
 
 instance Default InstCtrl where
   def = InstCtrl { action  = Nop
                  , aluSrcs = repeat SrcZero
                  , srcRegs = repeat 0
+                 , regForw = repeat Nothing
                  , dstReg  = 0 }
 
 decode :: Instruction -> InstCtrl
@@ -37,6 +43,7 @@ decode raw =
   InstCtrl { action  = act
            , aluSrcs = srcs
            , srcRegs = getSrcRegs raw
+           , regForw = repeat Nothing
            , dstReg  = getDstReg raw }
   where (act, srcs) = actionSrcs raw
 
@@ -61,11 +68,21 @@ withBypass :: InstCtrl -- ^ Current instruction
            -> InstCtrl -- ^ Instruction in EX
            -> InstCtrl -- ^ Instruction in MEM
            -> InstCtrl
-withBypass this ex mem = this { aluSrcs = map go . aluSrcs $ this }
+withBypass this ex mem = this { regForw = imap go . regForw $ this }
   where
-    go src@(SrcRs i)
-      | writesReg ex  rs = SrcMem
-      | writesReg mem rs = SrcWB
-      | otherwise        = src
+    go i _
+      | writesReg ex  rs = Just ForwMem
+      | writesReg mem rs = Just ForwWB
+      | otherwise        = Nothing
       where rs = srcRegs this !! i
-    go src = src
+
+bypassRegs :: Vec 2 (Maybe RegForw)   -- ^ Forwarding
+           -> Vec 2 MWordS            -- ^ Original register values
+           -> MWordS                  -- ^ Value in memory phase
+           -> MWordS                  -- ^ Value in writeback phase
+           -> Vec 2 MWordS
+bypassRegs forw regs mem wb = zipWith sel forw regs
+  where
+    sel (Nothing) reg    = reg
+    sel (Just ForwMem) _ = mem
+    sel (Just ForwWB)  _ = wb

@@ -9,7 +9,7 @@ import CPU.Instruction
 import CPU.Memory
 
 import Utils.Files
-import Utils (whenMaybe)
+import Utils (whenMaybe, liftA4)
 
 progBlobs = ($(getBank "../fib2.bin" 0) :>
              $(getBank "../fib2.bin" 1) :>
@@ -72,16 +72,23 @@ pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), ifJump)
 
     aluOp = getAluOp . action <$> inst
 
-    opands = bundle . map aluSrcMux' . unbundle
-           $ aluSrcs <$> inst
-      where aluSrcMux' src = aluSrcMux <$> src <*> srcs
-            srcs = bundle (regs, imm, pc, memAluRes, wbData)
+    -- Possibly override register contents with forwarded data
+    regs' = bypassRegs <$> (regForw <$> inst)
+                       <*> regs
+                       <*> memAluRes
+                       <*> wbData
+
+    -- Select proper inputs for the ALU
+    opands = bundle
+           . map (liftA4 aluSrcMux regs' imm pc)
+           . unbundle
+           . fmap aluSrcs $ inst
 
     aluRes = runAlu <$> aluOp <*> opands
-    rs2 = (!! 1) <$> regs -- TODO: Forwarding not working
+    rs2 = (!! 1) <$> regs'
 
     -- Don't pipeline as this is forwarded directly into PC register
-    ifJump = doJump . action <$> inst <*> aluRes <*> pc <*> regs <*> imm
+    ifJump = doJump . action <$> inst <*> aluRes <*> pc <*> regs' <*> imm
 
     -- EX/MEM regs:
     memInst   = register def inst
@@ -115,11 +122,13 @@ pipeline = bundle (stall, wbData, ex, jump)
     id = pipelineFetch stall jump
 
     -- Instruction decode
-    (ex, stall) = pipelineDecode id (isJust <$> jump) memInst wbMaybe
+    (ex, stall) = pipelineDecode id flush memInst wbMaybe
 
     -- Execute
     (mem, jump) = pipelineExecute ex wbData
     (memInst, _, _) = unbundle mem
+
+    flush = isJust <$> jump
 
     -- Memory and writeback
     wb = pipelineMemory mem
