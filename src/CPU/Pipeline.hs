@@ -1,4 +1,6 @@
-module CPU where
+module CPU.Pipeline
+  ( cpu
+  ) where
 
 import Clash.Prelude
 
@@ -8,8 +10,10 @@ import CPU.Machine
 import CPU.Instruction
 import CPU.Memory
 
+import qualified Periph.IO as IO
+
 import Utils.Files
-import Utils (whenMaybe)
+import Utils.Maybe (whenMaybe)
 
 progBlobs = ($(getBank "../fib2.bin" 0) :>
              $(getBank "../fib2.bin" 1) :>
@@ -17,15 +21,16 @@ progBlobs = ($(getBank "../fib2.bin" 0) :>
              $(getBank "../fib2.bin" 3) :> Nil)
 
 pipelineFetch :: HiddenClockResetEnable dom
-              => Signal dom (Bool)
+              => Vec 4 (MemBlob n 8)
+              -> Signal dom (Bool)
               -> Signal dom (Maybe PC)
               -> Signal dom (PC, Instruction)
-pipelineFetch stall jump = bundle (idPC, idInst)
+pipelineFetch imblob stall jump = bundle (idPC, idInst)
   where
     en = not <$> stall
 
     pc = regEn def en $ fromMaybe <$> (liftA2 (+) pc 4) <*> jump
-    inst = instructionMemory progBlobs <$> pc
+    inst = instructionMemory imblob <$> pc
 
     -- Flush fetched instruction on jump
     nop = 0x00000013
@@ -53,7 +58,7 @@ pipelineDecode id flush memInst wb = (bundle (exPC, exInst, exRegs, exImm), stal
     stall = needStall <$> inst <*> exInst
 
     -- Insert nop when stalling or flushing
-    inst'  = mux cond (pure def) inst
+    inst' = mux cond (pure def) inst
       where cond = (||) <$> stall <*> flush
 
     -- Adjust for forwarding if needed
@@ -102,28 +107,32 @@ pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), jumpPC)
     memRs2    = register def rs2
 
 pipelineMemory :: HiddenClockResetEnable dom
-               => Signal dom (InstCtrl, AluResult, RegValue) -- mem
+               => IO.Device dom
+               -> Signal dom (InstCtrl, AluResult, RegValue) -- mem
                -> Signal dom (InstCtrl, RegValue)            -- wb
-pipelineMemory mem = bundle (wbInst, wbData)
+pipelineMemory io mem = bundle (wbInst, wbData)
   where
     (inst, aluRes, rs2) = unbundle mem
 
     act = action <$> inst
-    rdata = dataMemorySE progBlobs act rs2 (fromIntegral <$> aluRes)
+    rdata  = io $ instIO <$> act <*> (fromIntegral <$> aluRes) <*> rs2
+    rdata' = signExtendIO <$> act <*> rdata
 
     -- MEM/WB regs:
     wbAluRes = register def aluRes
     wbInst   = register def inst
 
     -- Load data comes in the next clock cycle
-    wbData = writebackMux . action <$> wbInst <*> wbAluRes <*> rdata
+    wbData = writebackMux . action <$> wbInst <*> wbAluRes <*> rdata'
 
-pipeline :: HiddenClockResetEnable dom
-         => Signal dom (Bool, MWordS, (PC, InstCtrl, Vec 2 MWordS, MWordS), Maybe PC)
-pipeline = bundle (stall, wbData, ex, jump)
+cpu :: HiddenClockResetEnable dom
+    => Vec 4 (MemBlob n 8)
+    -> IO.Device dom
+    -> Signal dom (Bool, MWordS, (PC, InstCtrl, Vec 2 MWordS, MWordS), Maybe PC)
+cpu imblob io = bundle (stall, wbData, ex, jump)
   where
     -- Instruction fetch phase
-    id = pipelineFetch stall jump
+    id = pipelineFetch imblob stall jump
 
     -- Instruction decode phase
     (ex, stall) = pipelineDecode id flush memInst wbRegData
@@ -135,7 +144,7 @@ pipeline = bundle (stall, wbData, ex, jump)
     flush = isJust <$> jump
 
     -- Memory and writeback phases
-    wb = pipelineMemory mem
+    wb = pipelineMemory io mem
 
     (wbInst, wbData) = unbundle wb
     wbReg = dstReg <$> wbInst
@@ -146,6 +155,3 @@ pipeline = bundle (stall, wbData, ex, jump)
               . action <$> wbInst
                        <*> ((,) <$> wbReg <*> wbData)
 
-topEntity = exposeClockResetEnable @System $ pipeline
-
-sim = sampleN @System 2000 $ pipeline

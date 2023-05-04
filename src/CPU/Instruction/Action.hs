@@ -1,3 +1,5 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module CPU.Instruction.Action
   ( InstAction (..)
   , AluSrc (..)
@@ -7,12 +9,16 @@ module CPU.Instruction.Action
   , writebackMux
   , decodeAction
   , runJump
+  , instIO
+  , signExtendIO
   ) where
 
 import Clash.Prelude
 
 import CPU.Machine
 import CPU.Instruction.Format
+
+import qualified Periph.IO as IO
 
 -- | Possible sources for the ALU input
 data AluSrc = Src0 | Src4 | SrcReg (Index 2) | SrcImm | SrcPC
@@ -139,3 +145,25 @@ decodeAction raw =
     funct7 = getFunct7 raw
     funct3 = getFunct3 raw
     opcode = getOpcode raw
+
+instIO :: InstAction -> MAddr -> MWordS -> Maybe IO.Access
+instIO act addr wdata = case act of
+  MemLoad { width } -> Just $ IO.Access { IO.width = width,
+                                          IO.addr = addr,
+                                          IO.wdata = Nothing }
+  MemStore { width } -> Just $ IO.Access { IO.width = width,
+                                           IO.addr = addr,
+                                           IO.wdata = Just wdata }
+  _ -> Nothing
+
+signExtend2 :: Unsigned 2   -- ^ Width of the input as an exponent of 2
+            -> BitVector 32 -- ^ Input
+            -> BitVector 32 -- ^ Output
+signExtend2 width v = case width of
+  0 -> signExtend $ slice d7  d0 v
+  1 -> signExtend $ slice d15 d0 v
+  _ -> v
+
+signExtendIO :: InstAction -> MWordS -> MWordS
+signExtendIO MemLoad { width, sign = True } = unpack . signExtend2 width . pack
+signExtendIO _                              = id

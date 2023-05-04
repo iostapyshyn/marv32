@@ -1,4 +1,4 @@
-module Utils
+module Utils.Maybe
   ( whenMaybe
   , gatherMaybe
   ) where

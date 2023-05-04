@@ -3,11 +3,11 @@ all: verilog
 
 .PHONY: verilog
 verilog:
-	stack run clash -- CPU --verilog
+	stack run clash -- System --verilog
 
 .PHONY: vhdl
 vhdl:
-	stack run clash -- CPU --vhdl
+	stack run clash -- System --vhdl
 
 .PHONY: repl
 repl:

@@ -12,6 +12,8 @@ module CPU.Instruction
   , aluSrcMux
   , A.writebackMux
   , A.runJump
+  , A.instIO
+  , A.signExtendIO
   ) where
 
 import Clash.Prelude
