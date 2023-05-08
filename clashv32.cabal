@@ -43,7 +43,7 @@ common common-options
     NoImplicitPrelude
   ghc-options:
     -Wall -Wcompat -Wno-name-shadowing -Wno-incomplete-patterns
-    -Wno-type-defaults
+    -Wno-type-defaults -Wno-missing-signatures
     -haddock
 
     -- Plugins to support type-level constraint solving on naturals
@@ -96,6 +96,7 @@ library
     CPU.Pipeline
     Periph.IO
     Periph.Memory
+    System
   other-modules:
   default-language: Haskell2010
 

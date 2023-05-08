@@ -35,13 +35,14 @@ byteIndex width addr i = whenMaybe filter index
   where index  = fromIntegral $ (addr + fromIntegral i) `mod` 4
         filter = (shiftR i (fromIntegral width)) == 0
 
-blobMemory :: HiddenClockResetEnable dom
+blobMemory :: forall n dom
+              . (HiddenClockResetEnable dom, KnownNat n)
            => Vec 4 (MemBlob n 8)
-           -> IO.Device dom
-blobMemory blobs access = unpack <$> go
+           -> IO.Device dom (Maybe IO.Access)
+blobMemory blobs access = (unpack <$> go, access)
   where
     width = fromMaybe 0 <$> (fmap . fmap) IO.width access
-    addr = fromMaybe 0 <$> (fmap . fmap) IO.addr access
+    addr = fromMaybe 0 <$> (fmap . fmap) ((`mod` (natToNum @n)) . IO.addr) access
     wdata = fromMaybe Nothing <$> (fmap . fmap) IO.wdata access
 
     -- Data ready to read in the next clock cycle

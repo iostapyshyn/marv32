@@ -107,15 +107,15 @@ pipelineExecute ex wbData = (bundle (memInst, memAluRes, memRs2), jumpPC)
     memRs2    = register def rs2
 
 pipelineMemory :: HiddenClockResetEnable dom
-               => IO.Device dom
+               => IO.Device dom a
                -> Signal dom (InstCtrl, AluResult, RegValue) -- mem
-               -> Signal dom (InstCtrl, RegValue)            -- wb
-pipelineMemory io mem = bundle (wbInst, wbData)
+               -> (Signal dom (InstCtrl, RegValue), Signal dom a) -- wb
+pipelineMemory io mem = (bundle (wbInst, wbData), out)
   where
     (inst, aluRes, rs2) = unbundle mem
 
     act = action <$> inst
-    rdata  = io $ instIO <$> act <*> (fromIntegral <$> aluRes) <*> rs2
+    (rdata, out) = io $ instIO <$> act <*> (fromIntegral <$> aluRes) <*> rs2
     rdata' = signExtendIO <$> act <*> rdata
 
     -- MEM/WB regs:
@@ -127,9 +127,9 @@ pipelineMemory io mem = bundle (wbInst, wbData)
 
 cpu :: HiddenClockResetEnable dom
     => Vec 4 (MemBlob n 8)
-    -> IO.Device dom
-    -> Signal dom (Bool, MWordS, (PC, InstCtrl, Vec 2 MWordS, MWordS), Maybe PC)
-cpu imblob io = bundle (stall, wbData, ex, jump)
+    -> IO.Device dom a
+    -> Signal dom a
+cpu imblob io = out
   where
     -- Instruction fetch phase
     id = pipelineFetch imblob stall jump
@@ -144,7 +144,7 @@ cpu imblob io = bundle (stall, wbData, ex, jump)
     flush = isJust <$> jump
 
     -- Memory and writeback phases
-    wb = pipelineMemory io mem
+    (wb, out) = pipelineMemory io mem
 
     (wbInst, wbData) = unbundle wb
     wbReg = dstReg <$> wbInst
