@@ -66,7 +66,11 @@ needStall this ex = case ex of
   _                                  -> False
   where
     go (A.SrcReg i) = writesReg ex (srcRegs this !! i)
-    go _            = False
+    go _            = case this of
+      -- Special case:
+      -- rs2 bypasses ALU on store, but we might need to stall
+      InstCtrl { action = A.MemStore {} } -> writesReg ex (srcRegs this !! 1)
+      _                                   -> False -- Normal case
 
 -- | Adjust the control lines to forward results from preceeding instructions
 withBypass :: InstCtrl -- ^ Current instruction
