@@ -1,3 +1,4 @@
+
 module System
   ( topEntity
   , sim
@@ -9,9 +10,15 @@ import CPU.Pipeline
 import Periph.IO
 import Periph.Memory
 
+import CPU.Machine
+import CPU.Instruction
+
 import Data.Char
+import qualified Data.List as L
 
 import System.IO
+
+import Text.Printf
 
 import Utils.Files
 
@@ -38,8 +45,20 @@ debugIO access = unbundle
 
 topEntity = exposeClockResetEnable @System $ cpu progBlobs dataMem
 
-sim :: IO ()
-sim = sequence_ $ maybe (return ()) putChar <$> sample_lazy @System system
+-- sim :: IO ()
+sim =
+  --sequence_ $ printWB <$> sample_lazy @System system
+  sequence_ $ maybe (return ()) putChar . fst <$> sample_lazy @System system
   where
-    system :: HiddenClockResetEnable dom => Signal dom (Maybe Char)
+    system :: HiddenClockResetEnable dom => Signal dom ( Maybe Char
+                                                       , (PC, InstCtrl, Vec 2 AluOpand, Maybe (RegIndex, RegValue)) )
     system = cpu progBlobs debugIO
+
+    printWB :: ( Maybe Char
+               , (PC, InstCtrl, Vec 2 AluOpand, Maybe (RegIndex, RegValue))) -> IO ()
+    printWB (_, (pc, inst, opands, wb)) = putStr . L.concat $
+      [ printf "%04x: " pc', show inst, "\n"
+      , "   => ", show . (!!0) $ opands, " ", show . (!!1) $ opands, " -> ", show wb, "\n\n"]
+
+      where pc' :: Int
+            pc' = fromIntegral pc
