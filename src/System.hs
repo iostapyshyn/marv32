@@ -10,15 +10,11 @@ import CPU.Pipeline
 import Periph.IO
 import Periph.Memory
 
-import CPU.Machine
-import CPU.Instruction
+import CPU.Trace
 
 import Data.Char
-import qualified Data.List as L
 
 import System.IO
-
-import Text.Printf
 
 import Utils.Files
 
@@ -45,20 +41,13 @@ debugIO access = unbundle
 
 topEntity = exposeClockResetEnable @System $ cpu progBlobs dataMem
 
--- sim :: IO ()
-sim =
-  --sequence_ $ printWB <$> sample_lazy @System system
-  sequence_ $ maybe (return ()) putChar . fst <$> sample_lazy @System system
+sim :: Int -> IO ()
+sim n = withFile "trace.txt" WriteMode (\h -> mapM_ (go h) sampled)
   where
-    system :: HiddenClockResetEnable dom => Signal dom ( Maybe Char
-                                                       , (PC, InstCtrl, Vec 2 AluOpand, Maybe (RegIndex, RegValue)) )
+    system :: HiddenClockResetEnable dom => Signal dom (Maybe Char, Trace)
     system = cpu progBlobs debugIO
 
-    printWB :: ( Maybe Char
-               , (PC, InstCtrl, Vec 2 AluOpand, Maybe (RegIndex, RegValue))) -> IO ()
-    printWB (_, (pc, inst, opands, wb)) = putStr . L.concat $
-      [ printf "%04x: " pc', show inst, "\n"
-      , "   => ", show . (!!0) $ opands, " ", show . (!!1) $ opands, " -> ", show wb, "\n\n"]
+    sampled = sampleN @System n system
 
-      where pc' :: Int
-            pc' = fromIntegral pc
+    go handle (a, trace) = (maybe (return ()) putChar a) >>
+                           (hPutStr handle $ prettyTrace trace)

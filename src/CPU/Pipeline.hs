@@ -9,10 +9,10 @@ import Data.Maybe (fromMaybe, isJust)
 import CPU.Machine
 import CPU.Instruction
 import CPU.Memory
+import CPU.Trace
 
 import qualified Periph.IO as IO
 
-import Utils.Files
 import Utils.Maybe (whenMaybe)
 
 pipelineFetch :: HiddenClockResetEnable dom
@@ -131,8 +131,8 @@ pipelineMemory io mem = (bundle (wbPC, wbInst, wbOpands, wbData), out)
 cpu :: HiddenClockResetEnable dom
     => Vec 4 (MemBlob n 8)
     -> IO.Device dom a
-    -> Signal dom (a, (PC, InstCtrl, Vec 2 AluOpand, Maybe (RegIndex, RegValue)))
-cpu imblob io = bundle (out, bundle (wbPC, wbInst, wbOpands, wbRegData))
+    -> Signal dom (a, Trace)
+cpu imblob io = bundle (out, trace)
   where
     -- Instruction fetch phase
     id = pipelineFetch imblob stall jump
@@ -158,3 +158,4 @@ cpu imblob io = bundle (out, bundle (wbPC, wbInst, wbOpands, wbRegData))
               . action <$> wbInst
                        <*> ((,) <$> wbReg <*> wbData)
 
+    trace = wrapTrace <$> wbPC <*> wbInst <*> wbOpands <*> (fmap . fmap) snd wbRegData

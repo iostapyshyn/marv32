@@ -94,6 +94,7 @@ library
     CPU.Instruction.Action
     CPU.Memory
     CPU.Pipeline
+    CPU.Trace
     Periph.IO
     Periph.Memory
     System
