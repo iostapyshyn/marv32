@@ -3,18 +3,19 @@ all: verilog
 
 .PHONY: verilog
 verilog:
-	stack run clash -- System --verilog
+	cabal run clash -- System --verilog
 
 .PHONY: vhdl
 vhdl:
-	stack run clash -- System --vhdl
+	cabal run clash -- System --vhdl
 
 .PHONY: repl
 repl:
-	stack run clashi
+	cabal run clashi -- src/System.hs
 
 .PHONY: clean
 clean:
-	stack clean
+	cabal clean
 	rm -rf verilog/
 	rm -rf vhdl/
+	rm -f trace.txt
