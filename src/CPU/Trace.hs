@@ -28,5 +28,5 @@ wrapTrace pc ctrl opands wb = Trace { pc = pc
 
 prettyTrace :: Trace -> String
 prettyTrace Trace { pc, ctrl, opands, wb } =
-  L.concat $ [ printf "%04x: " pc, show ctrl, "\n"
-             , printf "%04x: " pc, show . toList $ opands, " -> ", show wb, "\n\n"]
+  L.concat [ printf "%04x: " pc, show ctrl, "\n"
+           , printf "%04x: " pc, show . toList $ opands, " -> ", show wb, "\n\n"]

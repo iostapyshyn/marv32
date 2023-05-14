@@ -68,6 +68,9 @@ common common-options
     -- remain strict.
     -fno-unbox-small-strict-fields
     -fno-unbox-strict-fields
+
+    -fwrite-ide-info
+    -hiedir=.hie
   build-depends:
     base,
     Cabal,

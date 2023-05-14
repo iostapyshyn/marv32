@@ -1,5 +1,4 @@
 {-# LANGUAGE MagicHash #-}
-{-# LANGUAGE NamedFieldPuns #-}
 
 module CPU.Memory
   ( registerFile
@@ -18,14 +17,14 @@ registerFile :: HiddenClockResetEnable dom
         -> Signal dom (Vec 2 RegValue)             -- ^ rs1, rs2 datas
 registerFile rd rs = mealy f (repeat 0 :: RegFile) (bundle (rd, rs))
   where -- Transfer function:
-    f s (rd, rs) = (s' rd, ( s' rd !! (rs !! 0) :>
-                             s' rd !! (rs !! 1) :> Nil))
+    f s (rd, rs) = (s' rd, s' rd !! (rs !! 0) :>
+                           s' rd !! (rs !! 1) :> Nil)
       where s' (Just (     0,      _)) = s -- r0 is always zero
             s' (Just (rdAddr, rdData)) = replace rdAddr rdData s
-            s' (Nothing)               = s
+            s' Nothing                 = s
 
 instructionMemory :: Vec 4 (MemBlob n 8) -> PC -> Instruction
 instructionMemory blobs pc = (concatBitVector# . reverse) roms
   where index = shiftR pc 2
         rom i = asyncRomBlob (blobs !! i) index
-        roms  = (rom 0 :> rom 1 :> rom 2 :> rom 3 :> Nil)
+        roms  = rom 0 :> rom 1 :> rom 2 :> rom 3 :> Nil

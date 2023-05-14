@@ -27,15 +27,16 @@ chunksOf n xs = L.take n xs : chunksOf n (L.drop n xs)
 
 toWord32 :: [Word8] -> Word32
 toWord32 xs = fromNum $ fromIntegral <$> xs
-  where fromNum (d:c:b:a:[]) = shiftL a 24 .|.
-                               shiftL b 16 .|.
-                               shiftL c  8 .|. d
+  where fromNum [d,c,b,a] = shiftL a 24 .|.
+                            shiftL b 16 .|.
+                            shiftL c  8 .|. d
+        fromNum _ = error "toWord32 expects a list with 4 elements"
 
 -- vecE :: Quote m => [m Exp] -> m Exp
 -- vecE [] = [| P.Nil |]
 -- vecE (x:xs) = [| (P.:>) $x $(vecE xs) |]
 
 getBank :: FilePath -> Int -> Q Exp
-getBank file i = (runIO bankIO) >>= (P.memBlobTH Nothing)
+getBank file i = runIO bankIO >>= P.memBlobTH Nothing
   where bankIO = do bytes <- B.unpack <$> B.readFile file
                     return $ takeEvery 4 . L.drop i $ bytes

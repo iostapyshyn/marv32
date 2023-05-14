@@ -17,8 +17,8 @@ import Utils.Files
 createOneFile :: [Word8] -> FilePath -> Int -> IO ()
 createOneFile bytes basename i = do
   withFile (wName i) WriteMode
-    (\h -> mapM_ (\x -> hPutStrLn h $ printf "%08b" x) $ (takeEvery 4 . drop i) bytes)
-  where wName i = printf "rom/%s/%d.rom" basename i
+    (\h -> mapM_ (hPutStrLn h . printf "%08b") $ (takeEvery 4 . drop i) bytes)
+  where wName = printf "rom/%s/%d.rom" basename
 
 createRomFile :: FilePath -> IO ()
 createRomFile fileR = do

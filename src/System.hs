@@ -18,10 +18,10 @@ import System.IO
 
 import Utils.Files
 
-progBlobs = ($(getBank "../fib.bin" 0) :>
-             $(getBank "../fib.bin" 1) :>
-             $(getBank "../fib.bin" 2) :>
-             $(getBank "../fib.bin" 3) :> Nil)
+progBlobs = $(getBank "../fib.bin" 0) :>
+            $(getBank "../fib.bin" 1) :>
+            $(getBank "../fib.bin" 2) :>
+            $(getBank "../fib.bin" 3) :> Nil
 
 dataMem :: HiddenClockResetEnable dom => Device dom (Maybe Access)
 dataMem = blobMemory progBlobs
@@ -29,7 +29,7 @@ dataMem = blobMemory progBlobs
 debugIO :: HiddenClockResetEnable dom => Device dom (Maybe Char)
 debugIO access = unbundle
                $ go <$> access'
-                    <*> (bundle $ dataMem access)
+                    <*> bundle (dataMem access)
   where
     go access (mem, _) = case access of
       Just Access { addr = 0xDEADBEEF
@@ -49,5 +49,5 @@ sim n = withFile "trace.txt" WriteMode (\h -> mapM_ (go h) sampled)
 
     sampled = sampleN @System n system
 
-    go handle (a, trace) = (maybe (return ()) putChar a) >>
-                           (hPutStr handle $ prettyTrace trace)
+    go handle (a, trace) = maybe (return ()) putChar a >>
+                           hPutStr handle (prettyTrace trace)

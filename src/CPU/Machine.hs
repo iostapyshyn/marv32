@@ -68,3 +68,4 @@ runAlu op (a :> b :> Nil) =
         bs = fromIntegral b :: MWordS -- signed
         bu = fromIntegral b :: MWordU -- unsigned
         bi = fromIntegral b :: Int    -- for shift
+runAlu _ _ = error ""

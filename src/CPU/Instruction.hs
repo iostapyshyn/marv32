@@ -62,7 +62,7 @@ needStall :: InstCtrl -- ^ Current instruction
           -> InstCtrl -- ^ Preceeding instruction in EX
           -> Bool
 needStall this ex = case ex of
-  InstCtrl { action = A.MemLoad {} } -> or . map go . aluSrcs $ this
+  InstCtrl { action = A.MemLoad {} } -> any go . aluSrcs $ this
   _                                  -> False
   where
     go (A.SrcReg i) = writesReg ex (srcRegs this !! i)

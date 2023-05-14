@@ -55,8 +55,8 @@ instAluOp _            = AluAdd
 -- | Return whether instruction involves a writeback
 writesBack :: InstAction -> Bool
 writesBack (ArithLog _) = True
-writesBack (MemLoad {}) = True
 writesBack (Jump _)     = True
+writesBack MemLoad {}   = True
 writesBack _            = False
 
 writebackMux :: InstAction -- ^ Instruction semantics
@@ -90,11 +90,12 @@ decodeAction raw =
     0x17 -> (ArithLog AluAdd, SrcPC    :> SrcImm   :> Nil) -- auipc
     0x03 -> (memLoad,         SrcReg 0 :> SrcImm   :> Nil)
     0x23 -> (memStore,        SrcReg 0 :> SrcImm   :> Nil)
-    0x6F -> (Jump $ Nothing,  SrcPC    :> Src4     :> Nil) -- jal
+    0x6F -> (Jump Nothing,    SrcPC    :> Src4     :> Nil) -- jal
     0x67 -> (Jump $ Just 0,   SrcPC    :> Src4     :> Nil) -- jalr
     0x63 -> (branch,          SrcReg 0 :> SrcReg 1 :> Nil)
     0x0F -> (Nop,             Src0     :> Src0     :> Nil) -- fence
     0x73 -> (Nop,             Src0     :> Src0     :> Nil) -- ecall/ebreak
+    _unk -> error "Unexpected opcode"
   where
     branch = case funct3 of
       0x0 -> Branch False AluXor                       -- beq
@@ -103,6 +104,7 @@ decodeAction raw =
       0x5 -> Branch False AluSlt                       -- bge
       0x6 -> Branch True  AluSltu                      -- bltu
       0x7 -> Branch False AluSltu                      -- bgeu
+      _   -> error "Unexpected funct3"
     memStore =
       MemStore { width = unpack $ slice d1 d0 funct3 } -- sb, sh, sw
     memLoad =
@@ -117,8 +119,10 @@ decodeAction raw =
       0x5 -> case funct7 of
         0x00 -> AluSrl                                 -- srli
         0x20 -> AluSra                                 -- srai
+        _    -> error "Unexpected funct7"
       0x6 -> AluOr                                     -- ori
       0x7 -> AluAnd                                    -- andi
+      _   -> error "Unexpected funct3"
     rAluOp = case funct7 of
       0x00 -> case funct3 of
         0x0 -> AluAdd                                  -- add
@@ -129,9 +133,11 @@ decodeAction raw =
         0x5 -> AluSrl                                  -- srl
         0x6 -> AluOr                                   -- or
         0x7 -> AluAnd                                  -- and
+        _   -> error "Unexpected funct3"
       0x20 -> case funct3 of
         0x0 -> AluSub                                  -- sub
         0x5 -> AluSra                                  -- sra
+        _   -> error "Unexpected funct3"
       0x01 -> case funct3 of
         0x0 -> AluMul                                  -- mul
         0x1 -> AluMulh                                 -- mulh
@@ -141,6 +147,8 @@ decodeAction raw =
         0x5 -> AluDivu                                 -- divu
         0x6 -> AluRem                                  -- rem
         0x7 -> AluRemu                                 -- remu
+        _   -> error "Unexpected funct3"
+      _   -> error "Unexpected funct7"
 
     funct7 = getFunct7 raw
     funct3 = getFunct3 raw

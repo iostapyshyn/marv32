@@ -31,6 +31,8 @@ cabal.config
 *.log
 *.tar.gz
 
+*.hie
+
 *~
 *.DS_Store
 

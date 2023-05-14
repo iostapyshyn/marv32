@@ -17,14 +17,14 @@ import Utils.Maybe (whenMaybe)
 
 pipelineFetch :: HiddenClockResetEnable dom
               => Vec 4 (MemBlob n 8)
-              -> Signal dom (Bool)
+              -> Signal dom Bool
               -> Signal dom (Maybe PC)
               -> Signal dom (PC, Instruction)
 pipelineFetch imblob stall jump = bundle (idPC, idInst)
   where
     en = not <$> stall
 
-    pc = regEn def en $ fromMaybe <$> (liftA2 (+) pc 4) <*> jump
+    pc = regEn def en $ fromMaybe <$> liftA2 (+) pc 4 <*> jump
     inst = instructionMemory imblob <$> pc
 
     -- Flush fetched instruction on jump
@@ -37,11 +37,11 @@ pipelineFetch imblob stall jump = bundle (idPC, idInst)
 
 pipelineDecode :: HiddenClockResetEnable dom
                => Signal dom (PC, Instruction)                           -- id
-               -> Signal dom (Bool)                                      -- flush on jump
-               -> Signal dom (InstCtrl)                                  -- mem
+               -> Signal dom Bool                                        -- flush on jump
+               -> Signal dom InstCtrl                                    -- mem
                -> Signal dom (Maybe (RegIndex, RegValue))                -- wb
                -> ( Signal dom (PC, InstCtrl, Vec 2 RegValue, Immediate) -- ex
-                  , Signal dom (Bool) )                                  -- stall?
+                  , Signal dom Bool )                                    -- stall?
 pipelineDecode id flush memInst wb = (bundle (exPC, exInst, exRegs, exImm), stall)
   where
     (pc, raw) = unbundle id
@@ -67,7 +67,7 @@ pipelineDecode id flush memInst wb = (bundle (exPC, exInst, exRegs, exImm), stal
 
 pipelineExecute :: HiddenClockResetEnable dom
                 => Signal dom (PC, InstCtrl, Vec 2 RegValue, Immediate) -- ex
-                -> Signal dom (RegValue)                                -- wb
+                -> Signal dom RegValue                                  -- wb
                 -> ( Signal dom (PC, InstCtrl, Vec 2 AluOpand, AluResult, RegValue) -- mem
                    , Signal dom (Maybe PC) )                            -- jump?
 pipelineExecute ex wbData = (bundle (memPC, memInst, memOpands, memAluRes, memRs2), jumpPC)
