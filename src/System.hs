@@ -18,10 +18,10 @@ import System.IO
 
 import Utils.Files
 
-progBlobs = $(getBank "../fib.bin" 0) :>
-            $(getBank "../fib.bin" 1) :>
-            $(getBank "../fib.bin" 2) :>
-            $(getBank "../fib.bin" 3) :> Nil
+progBlobs = $(getBank "app/fib.bin" 0) :>
+            $(getBank "app/fib.bin" 1) :>
+            $(getBank "app/fib.bin" 2) :>
+            $(getBank "app/fib.bin" 3) :> Nil
 
 dataMem :: HiddenClockResetEnable dom => Device dom (Maybe Access)
 dataMem = blobMemory progBlobs
