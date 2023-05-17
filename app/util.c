@@ -18,6 +18,8 @@ void *memset(void *str, int c, unsigned n)
     volatile char *s = str;
     for (int i = 0; i < n; i++)
 	s[i] = c;
+
+    return str;
 }
 
 int itoa(int value, char *sp, int radix)

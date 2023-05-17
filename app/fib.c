@@ -23,4 +23,6 @@ int main()
     outsz("Hello, World!\nfac(fib(6)) = ");
     outi(x);
     outc('\n');
+
+    return 0;
 }

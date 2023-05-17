@@ -2,34 +2,35 @@ NAME = fib
 
 COMMON_OBJS = util.o start.o
 
-CFLAGS = -march=rv32im -mabi=ilp32 -O3 -g
-LDFLAGS = -nostdlib -T bare.x -Wl,--build-id=none
-OBJCOPY_FLAGS = --set-section-flags .bss=alloc,load,contents --strip-debug
-# include .bss explicitly
+XCC = clang -target riscv32 -mcpu=generic-rv32
+XLD = ld.lld
 
-TARGET = riscv64-linux-gnu-
-CC = gcc
+XOBJCOPY = llvm-objcopy
+XOBJDUMP = llvm-objdump
+
+XCFLAGS = -march=rv32im -mabi=ilp32 -mno-relax -O2 -g -ffreestanding
+XLDFLAGS = -nostdlib -T bare.x --build-id=none
+XOBJCOPY_FLAGS = --set-section-flags .bss=alloc,load
+# include .bss explicitly
 
 all: $(NAME).bin
 
 .PRECIOUS: %.o
 %.o: %.S
-	$(TARGET)$(CC) $(CFLAGS) -c $< -o $@
+	$(XCC) $(XCFLAGS) -c $< -o $@
 
 %.o: %.c
-	$(TARGET)$(CC) $(CFLAGS) -c $< -o $@
+	$(XCC) $(XCFLAGS) -c $< -o $@
 
 %.elf: %.o $(COMMON_OBJS)
-	$(TARGET)$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
+	$(XLD) $(XLDFLAGS) $^ -o $@
 
 %.bin: %.elf
-	riscv64-linux-gnu-objcopy -O binary $(OBJCOPY_FLAGS) -S $< $@
+	$(XOBJCOPY) -O binary $(XOBJCOPY_FLAGS) -S $< $@
 
 .PHONY: disas
 disas: $(NAME).elf
-	riscv64-linux-gnu-objdump -S \
-		--visualize-jumps=color \
-		--disassembler-color=color $<
+	$(XOBJDUMP) -S $<
 
 .PHONY: clean
 clean:
