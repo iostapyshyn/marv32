@@ -41,7 +41,7 @@ blobMemory :: forall n dom
 blobMemory blobs access = (unpack <$> go, access)
   where
     width = fromMaybe 0 <$> (fmap . fmap) IO.width access
-    addr = fromMaybe 0 <$> (fmap . fmap) ((`mod` (natToNum @n)) . IO.addr) access
+    addr = fromMaybe 0 <$> (fmap . fmap) ((`mod` (natToNum @n * 4)) . IO.addr) access
     wdata = fromMaybe Nothing <$> (fmap . fmap) IO.wdata access
 
     -- Data ready to read in the next clock cycle
