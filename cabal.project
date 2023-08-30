@@ -1,5 +1,5 @@
 packages:
-  clashv32.cabal
+  marv32.cabal
 
 write-ghc-environment-files: always
 

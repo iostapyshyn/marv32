@@ -1,5 +1,5 @@
 cabal-version:       2.4
-name:                clashv32
+name:                marv32
 version:             0.1
 license:             BSD-2-Clause
 author:              Illia Ostapyshyn <ilya.ostapyshyn@gmail.com>
@@ -112,18 +112,18 @@ executable create_rom
   Build-Depends: base, filepath, directory, bytestring,
                  template-haskell, clash-prelude
 
--- Builds the executable 'clash', with clashv32 project in scope
+-- Builds the executable 'clash', with marv32 project in scope
 executable clash
   main-is: bin/Clash.hs
   default-language: Haskell2010
-  Build-Depends: base, clash-ghc, clashv32
+  Build-Depends: base, clash-ghc, marv32
   if !os(Windows)
     ghc-options: -dynamic
 
--- Builds the executable 'clashi', with clashv32 project in scope
+-- Builds the executable 'clashi', with marv32 project in scope
 executable clashi
   main-is: bin/Clashi.hs
   default-language: Haskell2010
   if !os(Windows)
     ghc-options: -dynamic
-  build-depends: base, clash-ghc, clashv32
+  build-depends: base, clash-ghc, marv32
