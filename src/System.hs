@@ -1,10 +1,9 @@
-
 module System
-  ( topEntity
-  , sim
-  ) where
+  ( sim
+  , marv32 ) where
 
 import Clash.Prelude
+import Clash.Annotations.TH
 
 import CPU.Pipeline
 import Periph.IO
@@ -39,7 +38,12 @@ debugIO access = unbundle
 
     access' = register Nothing access
 
-topEntity = exposeClockResetEnable @System $ cpu progBlobs dataMem
+marv32 :: "clk" ::: Clock System
+       -> "rst" ::: Reset System
+       -> "out" ::: Signal System ()
+marv32 clk rst = exposeClockResetEnable @System (fst <$> cpu progBlobs dataMem) clk rst enableGen
+
+makeTopEntity 'marv32
 
 sim :: Int -> IO ()
 sim n = withFile "trace.txt" WriteMode (\h -> mapM_ (go h) sampled)
