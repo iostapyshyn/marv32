@@ -1,4 +1,4 @@
-NAME = fib
+NAME = fib_hw
 
 COMMON_OBJS = util.o start.o
 
