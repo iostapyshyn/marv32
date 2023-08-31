@@ -23,7 +23,7 @@ progBlobs = $(getBank "app/fib.bin" 0) :>
             $(getBank "app/fib.bin" 2) :>
             $(getBank "app/fib.bin" 3) :> Nil
 
-dataMem :: HiddenClockResetEnable dom => Device dom (Maybe Access)
+dataMem :: HiddenClockResetEnable dom => Device dom ()
 dataMem = blobMemory progBlobs
 
 debugIO :: HiddenClockResetEnable dom => Device dom (Maybe Char)

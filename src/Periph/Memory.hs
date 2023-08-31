@@ -37,8 +37,8 @@ byteIndex width addr i = whenMaybe filter index
 blobMemory :: forall n dom
               . (HiddenClockResetEnable dom, KnownNat n)
            => Vec 4 (MemBlob n 8)
-           -> IO.Device dom (Maybe IO.Access)
-blobMemory blobs access = (unpack <$> go, access)
+           -> IO.Device dom ()
+blobMemory blobs access = (unpack <$> go, pure ())
   where
     width = fromMaybe 0 <$> (fmap . fmap) IO.width access
     addr = fromMaybe 0 <$> (fmap . fmap) ((`mod` (natToNum @n * 4)) . IO.addr) access
