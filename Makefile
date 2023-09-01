@@ -1,13 +1,13 @@
 .PHONY: all
-all: verilog
+all: vhdl
 
 .PHONY: verilog
 verilog: app
-	cabal run clash -- System --verilog
+	cabal run clash -- System --verilog -fclash-old-inline-strategy
 
 .PHONY: vhdl
 vhdl: app
-	cabal run clash -- System --vhdl
+	cabal run clash -- System --vhdl -fclash-old-inline-strategy
 
 .PHONY: repl
 repl: app

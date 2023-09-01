@@ -1,4 +1,4 @@
-NAME = fib_hw
+TARGETS = fib_tb fib_hw
 
 COMMON_OBJS = util.o start.o
 
@@ -13,7 +13,7 @@ XLDFLAGS = -nostdlib -T bare.x --build-id=none
 XOBJCOPY_FLAGS = --set-section-flags .bss=alloc,load
 # include .bss explicitly
 
-all: $(NAME).bin
+all: $(TARGETS:%=%.bin)
 
 .PRECIOUS: %.o
 %.o: %.S

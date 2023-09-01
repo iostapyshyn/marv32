@@ -15,6 +15,7 @@ import qualified Periph.IO as IO
 
 import Utils.Maybe (whenMaybe)
 
+{-# NOINLINE pipelineFetch #-}
 pipelineFetch :: HiddenClockResetEnable dom
               => Vec 4 (MemBlob n 8)
               -> Signal dom Bool
@@ -32,9 +33,12 @@ pipelineFetch imblob stall jump = bundle (idPC, idInst)
     inst' = mux (isJust <$> jump) (pure nop) inst
 
     -- IF/ID regs:
+    {-# NOINLINE idPC #-}
     idPC   = regEn def en pc
+    {-# NOINLINE idInst #-}
     idInst = regEn nop en inst'
 
+{-# NOINLINE pipelineDecode #-}
 pipelineDecode :: HiddenClockResetEnable dom
                => Signal dom (PC, Instruction)                           -- id
                -> Signal dom Bool                                        -- flush on jump
@@ -60,11 +64,16 @@ pipelineDecode id flush memInst wb = (bundle (exPC, exInst, exRegs, exImm), stal
     inst'' = withBypass <$> inst' <*> exInst <*> memInst
 
     -- ID/EX regs:
+    {-# NOINLINE exPC #-}
     exPC   = register def pc
+    {-# NOINLINE exInst #-}
     exInst = register def inst''
+    {-# NOINLINE exRegs #-}
     exRegs = register def regs
+    {-# NOINLINE exImm #-}
     exImm  = register def imm
 
+{-# NOINLINE pipelineExecute #-}
 pipelineExecute :: HiddenClockResetEnable dom
                 => Signal dom (PC, InstCtrl, Vec 2 RegValue, Immediate) -- ex
                 -> Signal dom RegValue                                  -- wb
@@ -97,13 +106,19 @@ pipelineExecute ex wbData = (bundle (memPC, memInst, memOpands, memAluRes, memRs
     rs2 = (!! 1) <$> regs'
 
     -- EX/MEM regs:
+    {-# NOINLINE memInst #-}
     memInst   = register def inst
+    {-# NOINLINE memAluRes #-}
     memAluRes = register def aluRes
+    {-# NOINLINE memRs2 #-}
     memRs2    = register def rs2
 
+    {-# NOINLINE memPC #-}
     memPC     = register def pc
+    {-# NOINLINE memOpands #-}
     memOpands = register def opands
 
+{-# NOINLINE pipelineMemory #-}
 pipelineMemory :: HiddenClockResetEnable dom
                => IO.Device dom a
                -> Signal dom (PC, InstCtrl, Vec 2 AluOpand, AluResult, RegValue) -- mem
@@ -116,11 +131,16 @@ pipelineMemory io mem = (bundle (wbPC, wbInst, wbOpands, wbData), out)
     (rdata, out) = io $ instIO <$> act <*> (fromIntegral <$> aluRes) <*> rs2
 
     -- MEM/WB regs:
+    {-# NOINLINE wbAluRes #-}
     wbAluRes = register def aluRes
+    {-# NOINLINE wbInst #-}
     wbInst   = register def inst
+    {-# NOINLINE wbAct #-}
     wbAct    = register Nop act
 
+    {-# NOINLINE wbPC #-}
     wbPC     = register def pc
+    {-# NOINLINE wbOpands #-}
     wbOpands = register def opands
 
     rdata' = signExtendIO <$> wbAct <*> rdata
